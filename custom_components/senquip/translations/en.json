@@ -1,0 +1,67 @@
+{
+    "config": {
+        "flow_title": "Senquip {device_name}",
+        "step": {
+            "user": {
+                "title": "Configure Senquip Device",
+                "description": "Enter the device name and the MQTT topic it publishes to.",
+                "data": {
+                    "device_name": "Device Name",
+                    "mqtt_topic": "MQTT Topic"
+                },
+                "data_description": {
+                    "device_name": "A friendly name for this device",
+                    "mqtt_topic": "The MQTT topic this device publishes telemetry to"
+                }
+            },
+            "discover": {
+                "title": "Discovering Sensors"
+            },
+            "select_sensors": {
+                "title": "Select Sensors",
+                "description": "Found {sensor_count} sensors on device **{device_id}**. Select which sensors to create.",
+                "data": {
+                    "selected_sensors": "Sensors"
+                }
+            },
+            "discovery_failed": {
+                "title": "Discovery Failed",
+                "description": "No data was received within 60 seconds. Ensure the device is powered on and publishing to the specified MQTT topic.",
+                "data": {}
+            }
+        },
+        "progress": {
+            "discovering": "Waiting for data from the device..."
+        },
+        "error": {
+            "cannot_connect": "Failed to connect to MQTT broker",
+            "invalid_topic": "Invalid MQTT topic"
+        },
+        "abort": {
+            "already_configured": "This device is already configured.",
+            "mqtt_not_available": "MQTT integration is not available."
+        }
+    },
+    "options": {
+        "step": {
+            "discover": {
+                "title": "Re-discovering Sensors"
+            },
+            "select_sensors": {
+                "title": "Select Sensors",
+                "description": "Found {sensor_count} sensors on device **{device_id}**. Update your sensor selection.",
+                "data": {
+                    "selected_sensors": "Sensors"
+                }
+            },
+            "discovery_failed": {
+                "title": "Discovery Failed",
+                "description": "No data was received within 60 seconds. Ensure the device is powered on and publishing to the specified MQTT topic.",
+                "data": {}
+            }
+        },
+        "progress": {
+            "discovering": "Waiting for data from the device..."
+        }
+    }
+}

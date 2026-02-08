@@ -1,7 +1,2 @@
 /.claude
 /.pytest_cache
-/custom_components
-/docs
-/example.json
-/hacs.json
-/tests
