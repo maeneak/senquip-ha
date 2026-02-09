@@ -124,12 +124,6 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if isinstance(last_event, dict):
                         data["events.last"] = last_event.get("msg", "")
 
-            # Custom parameters (cp1..cp34)
-            elif key.startswith("cp") and key[2:].isdigit():
-                sensor_key = f"custom.{key}"
-                if sensor_key in self._selected:
-                    data[sensor_key] = value
-
             # Internal/flat sensors
             elif isinstance(value, (int, float, str)):
                 sensor_key = f"internal.{key}"

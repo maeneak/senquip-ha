@@ -143,34 +143,6 @@ class TestClassifyCAN:
         assert spn190_count == 1
 
 
-class TestClassifyCustom:
-    """Test custom parameter classification."""
-
-    def test_custom_params_discovered(self):
-        result = _classify_payload(EXAMPLE_PAYLOAD)
-        custom = result.get("Custom", [])
-        keys = {s.key for s in custom}
-        assert "custom.cp18" in keys
-        assert "custom.cp28" in keys
-
-    def test_custom_param_name(self):
-        result = _classify_payload(EXAMPLE_PAYLOAD)
-        custom = result["Custom"]
-        cp18 = next(s for s in custom if s.key == "custom.cp18")
-        assert cp18.name == "Parameter 18"
-
-    def test_custom_default_selected(self):
-        result = _classify_payload(EXAMPLE_PAYLOAD)
-        for s in result["Custom"]:
-            assert s.default_selected is True
-
-    def test_custom_sample_value(self):
-        result = _classify_payload(EXAMPLE_PAYLOAD)
-        custom = result["Custom"]
-        cp18 = next(s for s in custom if s.key == "custom.cp18")
-        assert cp18.sample_value == 504
-
-
 class TestClassifyEvents:
     """Test events classification."""
 

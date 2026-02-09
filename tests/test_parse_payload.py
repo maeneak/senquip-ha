@@ -45,11 +45,6 @@ def _parse_payload(payload: dict, selected: set[str]) -> dict:
                 if isinstance(last_event, dict):
                     data["events.last"] = last_event.get("msg", "")
 
-        elif key.startswith("cp") and key[2:].isdigit():
-            sensor_key = f"custom.{key}"
-            if sensor_key in selected:
-                data[sensor_key] = value
-
         elif isinstance(value, (int, float, str)):
             sensor_key = f"internal.{key}"
             if sensor_key in selected:
@@ -149,21 +144,6 @@ class TestParsePayloadCAN:
         selected = {"can2.spn110"}
         result = _parse_payload(EXAMPLE_PAYLOAD, selected)
         assert result["can2.spn110"] == 120
-
-
-class TestParsePayloadCustom:
-    """Test custom parameter extraction."""
-
-    def test_selected_custom_params(self):
-        selected = {"custom.cp18", "custom.cp28"}
-        result = _parse_payload(EXAMPLE_PAYLOAD, selected)
-        assert result["custom.cp18"] == 504
-        assert result["custom.cp28"] == 1841
-
-    def test_unselected_custom_excluded(self):
-        selected = {"custom.cp18"}
-        result = _parse_payload(EXAMPLE_PAYLOAD, selected)
-        assert "custom.cp19" not in result
 
 
 class TestParsePayloadEvents:

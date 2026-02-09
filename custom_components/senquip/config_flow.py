@@ -322,18 +322,6 @@ def _classify_payload(
                     )
                 ]
 
-            # Custom parameters
-            elif key.startswith("cp") and key[2:].isdigit():
-                result.setdefault("Custom", []).append(
-                    DiscoveredSensor(
-                        key=f"custom.{key}",
-                        name=f"Parameter {key[2:]}",
-                        sample_value=value,
-                        unit=None,
-                        default_selected=True,
-                    )
-                )
-
             # Internal sensors
             elif isinstance(value, (int, float, str)):
                 meta = KNOWN_INTERNAL_SENSORS.get(key)
