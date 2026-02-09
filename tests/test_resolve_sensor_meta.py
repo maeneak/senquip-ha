@@ -62,13 +62,13 @@ class TestResolveCAN:
     def test_unknown_spn(self):
         meta = _resolve_sensor_meta("can2.spn99999")
         assert "SPN 99999" in meta.name
-        assert "CAN2" in meta.name
 
-    def test_port_in_name(self):
+    def test_name_excludes_port_prefix(self):
+        """Port prefix is omitted since device name provides that context."""
         meta1 = _resolve_sensor_meta("can1.spn190")
         meta2 = _resolve_sensor_meta("can2.spn190")
-        assert "CAN1" in meta1.name
-        assert "CAN2" in meta2.name
+        assert meta1.name == meta2.name
+        assert "CAN" not in meta1.name
 
 
 class TestResolveRawPGN:
@@ -80,22 +80,10 @@ class TestResolveRawPGN:
         assert "Raw" in meta.name
         assert meta.state_class is None
 
-    def test_raw_pgn_can1(self):
+    def test_raw_pgn_excludes_port_prefix(self):
         meta = _resolve_sensor_meta("can1.raw.12345")
-        assert "CAN1" in meta.name
-
-
-class TestResolveCustom:
-    """Test _resolve_sensor_meta for custom parameter keys."""
-
-    def test_custom_param(self):
-        meta = _resolve_sensor_meta("custom.cp18")
-        assert meta.name == "Custom Parameter 18"
-        assert meta.icon == "mdi:numeric"
-
-    def test_custom_param_high(self):
-        meta = _resolve_sensor_meta("custom.cp34")
-        assert meta.name == "Custom Parameter 34"
+        assert "PGN 12345" in meta.name
+        assert "CAN" not in meta.name
 
 
 class TestResolveEvents:

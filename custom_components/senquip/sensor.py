@@ -44,7 +44,6 @@ def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
     # CAN-decoded SPNs
     if ".spn" in sensor_key:
         parts = sensor_key.split(".")
-        port = parts[0].upper()  # "CAN1" or "CAN2"
         spn_str = parts[1]  # "spn190"
         spn_num = int(spn_str.removeprefix("spn"))
 
@@ -62,9 +61,9 @@ def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
                     SensorStateClass.MEASUREMENT,
                 )
 
-            name = f"{port} {spn_def.name}"
+            name = spn_def.name
             if acronym:
-                name = f"{port} {spn_def.name} ({acronym})"
+                name = f"{spn_def.name} ({acronym})"
 
             return SensorMeta(
                 name=name,
@@ -73,24 +72,15 @@ def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
                 unit=unit,
             )
 
-        return SensorMeta(name=f"{port} SPN {spn_num}")
+        return SensorMeta(name=f"SPN {spn_num}")
 
     # Raw unknown PGN
     if ".raw." in sensor_key:
         parts = sensor_key.split(".")
-        port = parts[0].upper()
         pgn = parts[2]
         return SensorMeta(
-            name=f"{port} PGN {pgn} (Raw)",
+            name=f"PGN {pgn} (Raw)",
             state_class=None,
-            icon="mdi:numeric",
-        )
-
-    # Custom parameters
-    if sensor_key.startswith("custom.cp"):
-        num = sensor_key.removeprefix("custom.cp")
-        return SensorMeta(
-            name=f"Custom Parameter {num}",
             icon="mdi:numeric",
         )
 
@@ -104,6 +94,34 @@ def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
         )
 
     return SensorMeta(name=sensor_key)
+
+
+# Port prefixes that get their own sub-device
+_PORT_PREFIXES = ("can1.", "can2.")
+
+
+def _build_device_info(
+    sensor_key: str, device_id: str, device_name: str
+) -> DeviceInfo:
+    """Return DeviceInfo for the base device or a port sub-device."""
+    for prefix in _PORT_PREFIXES:
+        if sensor_key.startswith(prefix):
+            port = prefix.rstrip(".")  # "can1" or "can2"
+            port_label = port.upper().replace("CAN", "CAN ")  # "CAN 1"
+            return DeviceInfo(
+                identifiers={(DOMAIN, f"{device_id}_{port}")},
+                name=f"{device_name} {port_label}",
+                manufacturer="Senquip",
+                via_device=(DOMAIN, device_id),
+            )
+
+    # Base device for internal sensors, events, etc.
+    return DeviceInfo(
+        identifiers={(DOMAIN, device_id)},
+        name=device_name,
+        manufacturer="Senquip",
+        model="QUAD-C2",
+    )
 
 
 async def async_setup_entry(
@@ -167,12 +185,9 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
         if sensor_meta.icon is not None:
             self._attr_icon = sensor_meta.icon
 
-        # Device grouping — all entities for this device_id share the same device
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
-            name=device_name,
-            manufacturer="Senquip",
-            model="QUAD-C2",
+        # Device grouping — assign to base device or port sub-device
+        self._attr_device_info = _build_device_info(
+            sensor_key, device_id, device_name
         )
 
     @property
