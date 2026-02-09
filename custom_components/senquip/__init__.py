@@ -38,6 +38,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._selected: set[str] = set(entry.data[CONF_SELECTED_SENSORS])
         self._decoder = J1939Decoder()
         self._unsubscribe: Any = None
+        self.diagnostics: dict[str, Any] = {}
 
     async def async_subscribe(self) -> None:
         """Subscribe to the device's MQTT topic."""
@@ -90,6 +91,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _parse_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Parse raw JSON into a flat {sensor_key: value} dict."""
         data: dict[str, Any] = {}
+        diag: dict[str, Any] = {}
 
         for key, value in payload.items():
             # Skip metadata fields
@@ -98,13 +100,44 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # CAN ports — decode J1939 frames
             if key in ("can1", "can2") and isinstance(value, list):
+                port_diag: list[dict[str, Any]] = []
+
                 for frame in value:
                     can_id = frame.get("id")
                     hex_data = frame.get("data")
                     if can_id is None or hex_data is None:
                         continue
 
+                    _, pgn, source = self._decoder.extract_pgn(can_id)
+                    pgn_def = self._decoder.get_pgn_info(can_id)
                     decoded = self._decoder.decode_frame(can_id, hex_data)
+
+                    frame_diag: dict[str, Any] = {
+                        "can_id": can_id,
+                        "can_id_hex": f"0x{can_id:08X}",
+                        "pgn": pgn,
+                        "pgn_hex": f"0x{pgn:04X}",
+                        "source_address": source,
+                        "data": hex_data,
+                        "known": pgn_def is not None,
+                    }
+
+                    if pgn_def:
+                        frame_diag["pgn_name"] = pgn_def.name
+                        frame_diag["pgn_acronym"] = pgn_def.acronym
+                        spns: dict[str, Any] = {}
+                        for spn_num, spn_value in decoded.items():
+                            spn_def = self._decoder.get_spn_def(spn_num)
+                            spn_entry: dict[str, Any] = {"value": spn_value}
+                            if spn_def:
+                                spn_entry["name"] = spn_def.name
+                                spn_entry["unit"] = spn_def.unit
+                            spns[str(spn_num)] = spn_entry
+                        frame_diag["spns"] = spns
+
+                    port_diag.append(frame_diag)
+
+                    # Normal sensor data extraction
                     for spn_num, spn_value in decoded.items():
                         sensor_key = f"{key}.spn{spn_num}"
                         if sensor_key in self._selected:
@@ -112,10 +145,12 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                     # Raw unknown PGNs
                     if not decoded:
-                        _, pgn, _ = self._decoder.extract_pgn(can_id)
                         raw_key = f"{key}.raw.{pgn}"
                         if raw_key in self._selected:
                             data[raw_key] = hex_data
+
+                if port_diag:
+                    diag[key] = port_diag
 
             # Events — store last event message
             elif key == "events" and isinstance(value, list):
@@ -130,6 +165,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if sensor_key in self._selected:
                     data[sensor_key] = value
 
+        self.diagnostics = diag
         return data
 
 
