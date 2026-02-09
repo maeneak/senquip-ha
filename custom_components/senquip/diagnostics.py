@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
+    CONF_J1939_PROFILES,
     CONF_MQTT_TOPIC,
     CONF_SELECTED_SENSORS,
     DOMAIN,
@@ -57,6 +58,7 @@ async def async_get_config_entry_diagnostics(
             "device_name": entry.data.get(CONF_DEVICE_NAME),
             "mqtt_topic": entry.data.get(CONF_MQTT_TOPIC),
             "selected_sensors": entry.data.get(CONF_SELECTED_SENSORS, []),
+            "j1939_profiles": entry.data.get(CONF_J1939_PROFILES, []),
         },
         "current_values": coordinator.data or {},
         "can_bus": can_summary,

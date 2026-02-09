@@ -3,7 +3,11 @@
 import pytest
 
 from custom_components.senquip.j1939_decoder import J1939Decoder
-from custom_components.senquip.j1939_database import PGN_DATABASE, SPN_DATABASE
+from custom_components.senquip.j1939_database import (
+    PGN_DATABASE,
+    SPN_DATABASE,
+    SPNDefinition,
+)
 
 
 @pytest.fixture
@@ -110,10 +114,10 @@ class TestDecodeSPN:
         result = decoder.decode_spn(spn_def, data)
         assert result == 369.0
 
-    def test_spn252_trip_fuel(self, decoder):
-        """SPN 252: bytes 5-8 = [0xBC, 0x1E, 0x02, 0x00], LE=138940, ×0.5 = 69470.0 L."""
+    def test_spn182_trip_fuel(self, decoder):
+        """SPN 182: bytes 5-8 = [0xBC, 0x1E, 0x02, 0x00], LE=138940, ×0.5 = 69470.0 L."""
         data = bytes.fromhex("E2020000BC1E0200")
-        spn_def = SPN_DATABASE[252]
+        spn_def = SPN_DATABASE[182]
         result = decoder.decode_spn(spn_def, data)
         assert result == 69470.0
 
@@ -180,7 +184,7 @@ class TestDecodeFrame:
         """Decode LFC frame — total fuel and trip fuel."""
         results = decoder.decode_frame(419358976, "E2020000BC1E0200")
         assert results[250] == 369.0
-        assert results[252] == 69470.0
+        assert results[182] == 69470.0
 
     def test_unknown_pgn_returns_empty(self, decoder):
         """Unknown PGN yields an empty dict."""
@@ -296,3 +300,33 @@ class TestDatabaseIntegrity:
                 f"SPN {spn_num} ({spn_def.name}) extends to byte {end_byte} "
                 f"but PGN {pgn_def.acronym} is only {pgn_def.length} bytes"
             )
+
+
+class TestCustomDatabases:
+    """Verify decoder uses custom database inputs."""
+
+    def test_default_databases_used(self):
+        decoder = J1939Decoder()
+        assert decoder.get_spn_def(110) is SPN_DATABASE[110]
+        assert decoder.get_pgn_info(0x18FEEE00) is PGN_DATABASE[65262]
+
+    def test_custom_spn_database_override(self):
+        base = SPN_DATABASE[110]
+        custom_spn = dict(SPN_DATABASE)
+        custom_spn[110] = SPNDefinition(
+            spn=base.spn,
+            name=base.name,
+            pgn=base.pgn,
+            start_byte=base.start_byte,
+            start_bit=base.start_bit,
+            bit_length=base.bit_length,
+            resolution=2,
+            offset=base.offset,
+            unit=base.unit,
+            min_value=base.min_value,
+            max_value=base.max_value,
+        )
+
+        decoder = J1939Decoder(pgn_database=PGN_DATABASE, spn_database=custom_spn)
+        results = decoder.decode_frame(0x18FEEE00, "A0FFFFB3FFFF9CFA")
+        assert results[110] == 280.0

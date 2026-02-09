@@ -17,6 +17,13 @@
             "discover": {
                 "title": "Discovering Sensors"
             },
+            "select_profiles": {
+                "title": "J1939 Profiles",
+                "description": "Select manufacturer profiles for CAN bus decoding. Profiles override built-in J1939 definitions.",
+                "data": {
+                    "j1939_profiles": "Profiles"
+                }
+            },
             "select_sensors": {
                 "title": "Select Sensors",
                 "description": "Found {sensor_count} sensors on device **{device_id}**. Select which sensors to create.",
@@ -46,6 +53,13 @@
         "step": {
             "discover": {
                 "title": "Re-discovering Sensors"
+            },
+            "select_profiles": {
+                "title": "J1939 Profiles",
+                "description": "Select manufacturer profiles for CAN bus decoding. Profiles override built-in J1939 definitions.",
+                "data": {
+                    "j1939_profiles": "Profiles"
+                }
             },
             "select_sensors": {
                 "title": "Select Sensors",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -13,12 +14,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CONF_DEVICE_ID,
+    CONF_J1939_PROFILES,
     CONF_MQTT_TOPIC,
     CONF_SELECTED_SENSORS,
     DOMAIN,
     PLATFORMS,
 )
+from .j1939_database import PGN_DATABASE, SPN_DATABASE
 from .j1939_decoder import J1939Decoder
+from .j1939_profile_loader import merge_databases
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +40,17 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._entry = entry
         self._device_id: str = entry.data[CONF_DEVICE_ID]
         self._selected: set[str] = set(entry.data[CONF_SELECTED_SENSORS])
-        self._decoder = J1939Decoder()
+
+        # Load J1939 profiles and merge with built-in database
+        profile_names = entry.data.get(CONF_J1939_PROFILES, [])
+        custom_dir = Path(__file__).parent / "j1939_custom"
+        profile_paths = [custom_dir / name for name in profile_names]
+
+        self._pgn_db, self._spn_db = merge_databases(
+            PGN_DATABASE, SPN_DATABASE, profile_paths
+        )
+        self._decoder = J1939Decoder(self._pgn_db, self._spn_db)
+
         self._unsubscribe: Any = None
         self.diagnostics: dict[str, Any] = {}
 

@@ -97,7 +97,7 @@ PGN_DATABASE: dict[int, PGNDefinition] = {
         name="Fuel Consumption (Liquid)",
         acronym="LFC",
         length=8,
-        spns=(250, 252),
+        spns=(250, 182),
     ),
     # PGN 65269 - Ambient Conditions
     65269: PGNDefinition(
@@ -596,8 +596,8 @@ SPN_DATABASE: dict[int, SPNDefinition] = {
         min_value=0,
         max_value=2105540607.5,
     ),
-    252: SPNDefinition(
-        spn=252,
+    182: SPNDefinition(
+        spn=182,
         name="Engine Trip Fuel",
         pgn=65257,
         start_byte=5,
@@ -770,9 +770,9 @@ SPN_DATABASE: dict[int, SPNDefinition] = {
     ),
     81: SPNDefinition(
         spn=81,
-        name="Intake Manifold 1 Pressure",
+        name="Particulate Trap Inlet Pressure",
         pgn=65270,
-        start_byte=2,
+        start_byte=1,
         start_bit=1,
         bit_length=8,
         resolution=2,
@@ -785,7 +785,7 @@ SPN_DATABASE: dict[int, SPNDefinition] = {
         spn=102,
         name="Boost Pressure",
         pgn=65270,
-        start_byte=1,
+        start_byte=2,
         start_bit=1,
         bit_length=8,
         resolution=2,

@@ -16,6 +16,20 @@ _LOGGER = logging.getLogger(__name__)
 class J1939Decoder:
     """Decode J1939 CAN bus frames into physical values."""
 
+    def __init__(
+        self,
+        pgn_database: dict[int, PGNDefinition] | None = None,
+        spn_database: dict[int, SPNDefinition] | None = None,
+    ) -> None:
+        """Initialize decoder with optional custom databases.
+
+        Args:
+            pgn_database: Custom PGN database. Defaults to built-in PGN_DATABASE.
+            spn_database: Custom SPN database. Defaults to built-in SPN_DATABASE.
+        """
+        self._pgn_db = pgn_database if pgn_database is not None else PGN_DATABASE
+        self._spn_db = spn_database if spn_database is not None else SPN_DATABASE
+
     @staticmethod
     def extract_pgn(can_id: int) -> tuple[int, int, int]:
         """Extract priority, PGN, and source address from a 29-bit CAN ID.
@@ -83,11 +97,11 @@ class J1939Decoder:
     def get_pgn_info(self, can_id: int) -> PGNDefinition | None:
         """Look up PGN definition for a CAN ID."""
         _, pgn, _ = self.extract_pgn(can_id)
-        return PGN_DATABASE.get(pgn)
+        return self._pgn_db.get(pgn)
 
     def get_spn_def(self, spn_num: int) -> SPNDefinition | None:
         """Look up SPN definition by number."""
-        return SPN_DATABASE.get(spn_num)
+        return self._spn_db.get(spn_num)
 
     def decode_frame(self, can_id: int, hex_data: str) -> dict[int, float | None]:
         """Decode all known SPNs from a single CAN frame.
@@ -102,7 +116,7 @@ class J1939Decoder:
         """
         _, pgn, _ = self.extract_pgn(can_id)
 
-        pgn_def = PGN_DATABASE.get(pgn)
+        pgn_def = self._pgn_db.get(pgn)
         if pgn_def is None:
             _LOGGER.debug("Unknown PGN %d (0x%04X) from CAN ID %d", pgn, pgn, can_id)
             return {}
@@ -115,7 +129,7 @@ class J1939Decoder:
 
         results: dict[int, float | None] = {}
         for spn_num in pgn_def.spns:
-            spn_def = SPN_DATABASE.get(spn_num)
+            spn_def = self._spn_db.get(spn_num)
             if spn_def is None:
                 continue
             value = self.decode_spn(spn_def, data_bytes)

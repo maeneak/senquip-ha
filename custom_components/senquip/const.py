@@ -27,6 +27,7 @@ CONF_MQTT_TOPIC = "mqtt_topic"
 CONF_DEVICE_ID = "device_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_SELECTED_SENSORS = "selected_sensors"
+CONF_J1939_PROFILES = "j1939_profiles"
 
 # Discovery timeout in seconds
 DISCOVERY_TIMEOUT = 60

@@ -27,13 +27,20 @@ from .const import (
     SPN_UNIT_TO_HA,
     SensorMeta,
 )
-from .j1939_database import PGN_DATABASE, SPN_DATABASE
+from .j1939_database import PGN_DATABASE, SPN_DATABASE, PGNDefinition, SPNDefinition
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
+def _resolve_sensor_meta(
+    sensor_key: str,
+    pgn_database: dict[int, PGNDefinition] | None = None,
+    spn_database: dict[int, SPNDefinition] | None = None,
+) -> SensorMeta:
     """Determine HA sensor attributes from a sensor key string."""
+    pgn_db = pgn_database if pgn_database is not None else PGN_DATABASE
+    spn_db = spn_database if spn_database is not None else SPN_DATABASE
+
     # Internal sensors
     if sensor_key.startswith("internal."):
         json_key = sensor_key.removeprefix("internal.")
@@ -47,9 +54,9 @@ def _resolve_sensor_meta(sensor_key: str) -> SensorMeta:
         spn_str = parts[1]  # "spn190"
         spn_num = int(spn_str.removeprefix("spn"))
 
-        spn_def = SPN_DATABASE.get(spn_num)
+        spn_def = spn_db.get(spn_num)
         if spn_def:
-            pgn_def = PGN_DATABASE.get(spn_def.pgn)
+            pgn_def = pgn_db.get(spn_def.pgn)
             acronym = pgn_def.acronym if pgn_def else ""
             ha_mapping = SPN_UNIT_TO_HA.get(spn_def.unit)
             if ha_mapping:
@@ -137,7 +144,11 @@ async def async_setup_entry(
 
     entities: list[SenquipSensorEntity] = []
     for sensor_key in selected:
-        meta = _resolve_sensor_meta(sensor_key)
+        meta = _resolve_sensor_meta(
+            sensor_key,
+            pgn_database=coordinator._pgn_db,
+            spn_database=coordinator._spn_db,
+        )
         entities.append(
             SenquipSensorEntity(
                 coordinator=coordinator,

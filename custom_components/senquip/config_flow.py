@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -24,6 +25,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
+    CONF_J1939_PROFILES,
     CONF_MQTT_TOPIC,
     CONF_SELECTED_SENSORS,
     DISCOVERY_TIMEOUT,
@@ -32,6 +34,7 @@ from .const import (
 )
 from .j1939_database import PGN_DATABASE, SPN_DATABASE
 from .j1939_decoder import J1939Decoder
+from .j1939_profile_loader import discover_profiles, merge_databases
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +75,10 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_name: str = ""
         self._mqtt_topic: str = ""
         self._device_id: str = ""
+        self._device_payload: dict[str, Any] | None = None
         self._discovered_sensors: dict[str, list[DiscoveredSensor]] = {}
+        self._available_profiles: dict[str, str] = {}
+        self._selected_profiles: list[str] = []
         self._discovery_task: asyncio.Task | None = None
 
     async def async_step_user(
@@ -121,7 +127,7 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_progress_done(next_step_id="discovery_failed")
 
         self._discovery_task = None
-        return self.async_show_progress_done(next_step_id="select_sensors")
+        return self.async_show_progress_done(next_step_id="select_profiles")
 
     async def async_step_discovery_failed(
         self, user_input: dict[str, Any] | None = None
@@ -134,10 +140,55 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="discovery_failed")
 
+    async def async_step_select_profiles(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 3: Select optional J1939 profile overrides."""
+        if user_input is not None:
+            self._selected_profiles = user_input.get(CONF_J1939_PROFILES, [])
+            if self._device_payload is not None:
+                decoder = _build_profile_decoder(self._selected_profiles)
+                self._discovered_sensors = _classify_payload(
+                    self._device_payload, decoder=decoder
+                )
+            return await self.async_step_select_sensors()
+
+        custom_dir = Path(__file__).parent / "j1939_custom"
+        self._available_profiles = discover_profiles(custom_dir)
+        if not self._available_profiles:
+            self._selected_profiles = []
+            if self._device_payload is not None and not self._discovered_sensors:
+                self._discovered_sensors = _classify_payload(self._device_payload)
+            return await self.async_step_select_sensors()
+
+        options = [
+            SelectOptionDict(value=filename, label=display_name)
+            for filename, display_name in sorted(
+                self._available_profiles.items(), key=lambda item: item[1].lower()
+            )
+        ]
+        defaults = [
+            name for name in self._selected_profiles if name in self._available_profiles
+        ]
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_J1939_PROFILES, default=defaults): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+
+        return self.async_show_form(step_id="select_profiles", data_schema=schema)
+
     async def async_step_select_sensors(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 3: Present discovered sensors for user selection."""
+        """Step 4: Present discovered sensors for user selection."""
         if user_input is not None:
             selected = user_input.get("selected_sensors", [])
             return self.async_create_entry(
@@ -147,6 +198,7 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_DEVICE_ID: self._device_id,
                     CONF_DEVICE_NAME: self._device_name,
                     CONF_SELECTED_SENSORS: selected,
+                    CONF_J1939_PROFILES: self._selected_profiles,
                 },
             )
 
@@ -240,104 +292,118 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         # Classify all fields
+        self._device_payload = device_payload
         self._discovered_sensors = _classify_payload(device_payload)
+
+
+def _build_profile_decoder(profile_names: list[str]) -> J1939Decoder:
+    """Return a decoder using the selected profile overrides."""
+    if not profile_names:
+        return J1939Decoder()
+
+    custom_dir = Path(__file__).parent / "j1939_custom"
+    profile_paths = [custom_dir / name for name in profile_names]
+    pgn_db, spn_db = merge_databases(PGN_DATABASE, SPN_DATABASE, profile_paths)
+    return J1939Decoder(pgn_db, spn_db)
 
 
 def _classify_payload(
     payload: dict[str, Any],
+    decoder: J1939Decoder | None = None,
 ) -> dict[str, list[DiscoveredSensor]]:
-        """Classify all payload fields into sensor categories."""
-        result: dict[str, list[DiscoveredSensor]] = {}
+    """Classify all payload fields into sensor categories."""
+    result: dict[str, list[DiscoveredSensor]] = {}
+    if decoder is None:
         decoder = J1939Decoder()
 
-        for key, value in payload.items():
-            # Skip metadata
-            if key in ("deviceid", "ts", "time"):
-                continue
+    for key, value in payload.items():
+        # Skip metadata
+        if key in ("deviceid", "ts", "time"):
+            continue
 
-            # CAN ports
-            if key in ("can1", "can2") and isinstance(value, list):
-                category = key.upper()
-                sensors: list[DiscoveredSensor] = []
-                seen_spns: set[int] = set()
+        # CAN ports
+        if key in ("can1", "can2") and isinstance(value, list):
+            category = key.upper()
+            sensors: list[DiscoveredSensor] = []
+            seen_spns: set[int] = set()
 
-                for frame in value:
-                    can_id = frame.get("id")
-                    hex_data = frame.get("data")
-                    if can_id is None or hex_data is None:
-                        continue
+            for frame in value:
+                can_id = frame.get("id")
+                hex_data = frame.get("data")
+                if can_id is None or hex_data is None:
+                    continue
 
-                    decoded = decoder.decode_frame(can_id, hex_data)
-                    pgn_info = decoder.get_pgn_info(can_id)
+                decoded = decoder.decode_frame(can_id, hex_data)
+                pgn_info = decoder.get_pgn_info(can_id)
 
-                    if decoded:
-                        for spn_num, spn_value in decoded.items():
-                            if spn_num in seen_spns:
-                                continue
-                            seen_spns.add(spn_num)
+                if decoded:
+                    for spn_num, spn_value in decoded.items():
+                        if spn_num in seen_spns:
+                            continue
+                        seen_spns.add(spn_num)
 
-                            spn_def = decoder.get_spn_def(spn_num)
-                            if spn_def is None:
-                                continue
+                        spn_def = decoder.get_spn_def(spn_num)
+                        if spn_def is None:
+                            continue
 
-                            acronym = pgn_info.acronym if pgn_info else "?"
-                            sensors.append(
-                                DiscoveredSensor(
-                                    key=f"{key}.spn{spn_num}",
-                                    name=f"{spn_def.name} — {acronym}",
-                                    sample_value=spn_value,
-                                    unit=spn_def.unit,
-                                    default_selected=spn_value is not None,
-                                )
-                            )
-                    else:
-                        # Unknown PGN
-                        _, pgn, _ = decoder.extract_pgn(can_id)
+                        acronym = pgn_info.acronym if pgn_info else "?"
                         sensors.append(
                             DiscoveredSensor(
-                                key=f"{key}.raw.{pgn}",
-                                name=f"Unknown PGN {pgn} (0x{pgn:04X})",
-                                sample_value=hex_data[:16]
-                                + ("..." if len(hex_data) > 16 else ""),
-                                unit=None,
-                                default_selected=False,
+                                key=f"{key}.spn{spn_num}",
+                                name=f"{spn_def.name} — {acronym}",
+                                sample_value=spn_value,
+                                unit=spn_def.unit,
+                                default_selected=spn_value is not None,
                             )
                         )
-
-                if sensors:
-                    result[category] = sensors
-
-            # Events
-            elif key == "events" and isinstance(value, list):
-                sample_msg = ""
-                if value and isinstance(value[0], dict):
-                    sample_msg = value[0].get("msg", "")
-                result["Events"] = [
-                    DiscoveredSensor(
-                        key="events.last",
-                        name="Last Event",
-                        sample_value=sample_msg,
-                        unit=None,
-                        default_selected=True,
+                else:
+                    # Unknown PGN
+                    _, pgn, _ = decoder.extract_pgn(can_id)
+                    sensors.append(
+                        DiscoveredSensor(
+                            key=f"{key}.raw.{pgn}",
+                            name=f"Unknown PGN {pgn} (0x{pgn:04X})",
+                            sample_value=hex_data[:16]
+                            + ("..." if len(hex_data) > 16 else ""),
+                            unit=None,
+                            default_selected=False,
+                        )
                     )
-                ]
 
-            # Internal sensors
-            elif isinstance(value, (int, float, str)):
-                meta = KNOWN_INTERNAL_SENSORS.get(key)
-                name = meta.name if meta else key.replace("_", " ").title()
-                unit = meta.unit if meta else None
-                result.setdefault("Internal", []).append(
-                    DiscoveredSensor(
-                        key=f"internal.{key}",
-                        name=name,
-                        sample_value=value,
-                        unit=unit,
-                        default_selected=True,
-                    )
+            if sensors:
+                result[category] = sensors
+
+        # Events
+        elif key == "events" and isinstance(value, list):
+            sample_msg = ""
+            if value and isinstance(value[0], dict):
+                sample_msg = value[0].get("msg", "")
+            result["Events"] = [
+                DiscoveredSensor(
+                    key="events.last",
+                    name="Last Event",
+                    sample_value=sample_msg,
+                    unit=None,
+                    default_selected=True,
                 )
+            ]
 
-        return result
+        # Internal sensors
+        elif isinstance(value, (int, float, str)):
+            meta = KNOWN_INTERNAL_SENSORS.get(key)
+            name = meta.name if meta else key.replace("_", " ").title()
+            unit = meta.unit if meta else None
+            result.setdefault("Internal", []).append(
+                DiscoveredSensor(
+                    key=f"internal.{key}",
+                    name=name,
+                    sample_value=value,
+                    unit=unit,
+                    default_selected=True,
+                )
+            )
+
+    return result
 
 
 class SenquipOptionsFlow(config_entries.OptionsFlow):
@@ -346,7 +412,12 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._device_payload: dict[str, Any] | None = None
         self._discovered_sensors: dict[str, list[DiscoveredSensor]] = {}
+        self._available_profiles: dict[str, str] = {}
+        self._selected_profiles: list[str] = list(
+            config_entry.data.get(CONF_J1939_PROFILES, [])
+        )
         self._discovery_task: asyncio.Task | None = None
 
     async def async_step_init(
@@ -380,7 +451,7 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
             return self.async_show_progress_done(next_step_id="discovery_failed")
 
         self._discovery_task = None
-        return self.async_show_progress_done(next_step_id="select_sensors")
+        return self.async_show_progress_done(next_step_id="select_profiles")
 
     async def async_step_discovery_failed(
         self, user_input: dict[str, Any] | None = None
@@ -392,6 +463,51 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(step_id="discovery_failed")
 
+    async def async_step_select_profiles(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Select J1939 profile overrides for options flow."""
+        if user_input is not None:
+            self._selected_profiles = user_input.get(CONF_J1939_PROFILES, [])
+            if self._device_payload is not None:
+                decoder = _build_profile_decoder(self._selected_profiles)
+                self._discovered_sensors = _classify_payload(
+                    self._device_payload, decoder=decoder
+                )
+            return await self.async_step_select_sensors()
+
+        custom_dir = Path(__file__).parent / "j1939_custom"
+        self._available_profiles = discover_profiles(custom_dir)
+        if not self._available_profiles:
+            self._selected_profiles = []
+            if self._device_payload is not None and not self._discovered_sensors:
+                self._discovered_sensors = _classify_payload(self._device_payload)
+            return await self.async_step_select_sensors()
+
+        options = [
+            SelectOptionDict(value=filename, label=display_name)
+            for filename, display_name in sorted(
+                self._available_profiles.items(), key=lambda item: item[1].lower()
+            )
+        ]
+        defaults = [
+            name for name in self._selected_profiles if name in self._available_profiles
+        ]
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_J1939_PROFILES, default=defaults): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options,
+                        multiple=True,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+
+        return self.async_show_form(step_id="select_profiles", data_schema=schema)
+
     async def async_step_select_sensors(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -399,7 +515,11 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             selected = user_input.get("selected_sensors", [])
             # Update config entry data with new sensor selection
-            new_data = {**self._config_entry.data, CONF_SELECTED_SENSORS: selected}
+            new_data = {
+                **self._config_entry.data,
+                CONF_SELECTED_SENSORS: selected,
+                CONF_J1939_PROFILES: self._selected_profiles,
+            }
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data=new_data
             )
@@ -493,4 +613,5 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
             raise RuntimeError("Unexpected payload format")
 
         # Re-use the classify logic from the main config flow
+        self._device_payload = device_payload
         self._discovered_sensors = _classify_payload(device_payload)

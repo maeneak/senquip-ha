@@ -1,0 +1,38 @@
+{
+  "name": "MAN D2862-LE466",
+  "description": "MAN V12 marine diesel engine - overrides VEP1 PGN to match MAN-specific byte layout",
+  "pgns": {
+    "65271": {
+      "name": "Vehicle Electrical Power 1",
+      "acronym": "VEP1",
+      "length": 8,
+      "spns": [167, 168]
+    }
+  },
+  "spns": {
+    "167": {
+      "name": "Alternator Voltage",
+      "pgn": 65271,
+      "start_byte": 3,
+      "start_bit": 1,
+      "bit_length": 16,
+      "resolution": 0.05,
+      "offset": 0,
+      "unit": "V",
+      "min_value": 0,
+      "max_value": 3212.75
+    },
+    "168": {
+      "name": "Battery Potential",
+      "pgn": 65271,
+      "start_byte": 7,
+      "start_bit": 1,
+      "bit_length": 16,
+      "resolution": 0.05,
+      "offset": 0,
+      "unit": "V",
+      "min_value": 0,
+      "max_value": 3212.75
+    }
+  }
+}

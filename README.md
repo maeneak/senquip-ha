@@ -14,7 +14,8 @@ A custom [Home Assistant](https://www.home-assistant.io/) integration for [Senqu
   - **CAN** — decoded J1939 SPNs (engine speed, coolant temp, vehicle speed, fuel, hours, …)
   - **Custom parameters** — user-defined `cp1`–`cp34` values from the device
   - **Events** — last event message
-- **Extensible PGN/SPN database** — add new J1939 definitions by editing `j1939_database.py`
+- **Profile-based J1939 overrides** — drop JSON profiles into `j1939_custom/` and select them per device
+- **Extensible PGN/SPN database** — still possible by editing `j1939_database.py`
 - **Device grouping** — all sensors for a device appear under one HA device entry
 - **Options flow** — re-trigger discovery and change selected sensors without removing the integration
 
@@ -58,8 +59,9 @@ Unknown PGNs are shown as raw hex and can be optionally selected.
 2. Search for **Senquip Telemetry**
 3. Enter a device name and the MQTT topic the device publishes to (e.g. `senquip/HE8EV12LF/data`)
 4. Wait for the integration to receive the first MQTT message and discover sensors
-5. Select which sensors to create as HA entities
-6. Done — entities will update automatically on each MQTT message
+5. (Optional) Select any J1939 profile overrides for your engine/manufacturer
+6. Select which sensors to create as HA entities
+7. Done — entities will update automatically on each MQTT message
 
 ### Changing Selected Sensors
 
@@ -90,6 +92,74 @@ Edit `custom_components/senquip/j1939_database.py`:
 ```
 
 Restart Home Assistant and re-add (or reconfigure) the device to discover the new sensors.
+
+## Using J1939 Profile Overrides (JSON)
+
+For manufacturer-specific byte layouts (e.g., MAN VEP1), place a JSON profile in
+`custom_components/senquip/j1939_custom/` and select it during setup or in the
+Options flow.
+
+### Profile Behavior
+
+- Profiles **override** built-in PGNs/SPNs with the same IDs.
+- If a profile defines PGN `65271`, the built-in PGN `65271` (and its SPN list)
+  is completely replaced by the profile definition.
+- Multiple profiles can be selected; later profiles override earlier ones.
+
+### Profile Schema
+
+Keys for `pgns` and `spns` are **strings** (JSON limitation). All SPN fields map
+to the built-in `SPNDefinition` fields.
+
+```json
+{
+  "name": "MAN D2862-LE466",
+  "description": "MAN V12 marine diesel",
+  "pgns": {
+    "65271": {
+      "name": "Vehicle Electrical Power 1",
+      "acronym": "VEP1",
+      "length": 8,
+      "spns": [167, 168]
+    }
+  },
+  "spns": {
+    "167": {
+      "name": "Alternator Voltage",
+      "pgn": 65271,
+      "start_byte": 3,
+      "start_bit": 1,
+      "bit_length": 16,
+      "resolution": 0.05,
+      "offset": 0,
+      "unit": "V",
+      "min_value": 0,
+      "max_value": 3212.75
+    }
+  }
+}
+```
+
+### Recommended Workflow
+
+1. Create a new profile JSON in `custom_components/senquip/j1939_custom/`.
+2. Restart Home Assistant.
+3. Reconfigure the integration and select the profile in the **J1939 Profiles**
+   step (Options flow also supported).
+
+### Profile Order
+
+If you select multiple profiles, they are merged in the order shown in the list,
+and later profiles override earlier ones when they define the same PGN/SPN.
+
+## Diagnostics
+
+The integration exposes a diagnostics payload (in Home Assistant: the device
+page → **Diagnostics**). It includes:
+
+- The config values (MQTT topic, selected sensors, and selected J1939 profiles)
+- Current sensor values from the coordinator
+- A CAN bus summary with known/unknown frames and per-frame decoded SPNs
 
 ## License
 
