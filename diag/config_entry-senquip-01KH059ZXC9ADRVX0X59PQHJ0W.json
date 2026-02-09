@@ -1,0 +1,1299 @@
+{
+  "home_assistant": {
+    "installation_type": "Home Assistant Container",
+    "version": "2026.2.1",
+    "dev": false,
+    "hassio": false,
+    "virtualenv": false,
+    "python_version": "3.13.11",
+    "docker": true,
+    "arch": "x86_64",
+    "timezone": "Australia/Brisbane",
+    "os_name": "Linux",
+    "os_version": "4.4.302+",
+    "container_arch": "amd64",
+    "run_as_root": true
+  },
+  "custom_components": {
+    "hacs": {
+      "documentation": "https://hacs.xyz/docs/use/",
+      "version": "2.0.5",
+      "requirements": [
+        "aiogithubapi>=22.10.1"
+      ]
+    },
+    "avgear_matrix": {
+      "documentation": "https://github.com/maeneak/avgearip",
+      "version": "0.2.3",
+      "requirements": []
+    },
+    "audac_luna_u": {
+      "documentation": "https://github.com/maeneak/audac-lunau-ha",
+      "version": "0.4",
+      "requirements": []
+    },
+    "senquip": {
+      "documentation": "https://docs.senquip.com/quad-c2-user-guide/",
+      "version": "0.2.0",
+      "requirements": []
+    }
+  },
+  "integration_manifest": {
+    "domain": "senquip",
+    "name": "Senquip Telemetry",
+    "codeowners": [
+      "maeneak"
+    ],
+    "config_flow": true,
+    "dependencies": [
+      "mqtt"
+    ],
+    "documentation": "https://docs.senquip.com/quad-c2-user-guide/",
+    "iot_class": "local_push",
+    "version": "0.2.0",
+    "is_built_in": false,
+    "overwrites_built_in": false
+  },
+  "setup_times": {
+    "null": {
+      "setup": 3.0410010367631912e-05
+    },
+    "01KH059ZXC9ADRVX0X59PQHJ0W": {
+      "wait_import_platforms": -0.3022941459203139,
+      "config_entry_setup": 0.32758469006512314
+    }
+  },
+  "data": {
+    "config": {
+      "device_id": "HE8EV12LF",
+      "device_name": "Starboard Engineroom",
+      "mqtt_topic": "senquip/quad/stbd/json",
+      "selected_sensors": [
+        "internal.vsys",
+        "internal.vin",
+        "internal.ambient",
+        "internal.light",
+        "internal.movement_hrs",
+        "internal.state",
+        "internal.accel_x",
+        "internal.accel_y",
+        "internal.accel_z",
+        "internal.roll",
+        "internal.pitch",
+        "internal.angle",
+        "internal.motion",
+        "internal.wifi_ip",
+        "internal.wifi_rssi",
+        "can1.spn183",
+        "can1.spn184",
+        "can1.spn185",
+        "can1.spn51",
+        "can1.spn512",
+        "can1.spn513",
+        "can1.spn190",
+        "can1.spn1483",
+        "can1.spn2432",
+        "can1.spn108",
+        "can1.spn92",
+        "can1.spn2970",
+        "can1.spn100",
+        "can1.spn111",
+        "can1.spn105",
+        "can1.spn81",
+        "can1.spn247",
+        "can1.spn249",
+        "can1.spn167",
+        "can1.spn110",
+        "can1.spn250",
+        "can1.spn252",
+        "can2.spn513",
+        "can2.spn190",
+        "can2.spn1483",
+        "can2.spn94",
+        "can2.spn100",
+        "can2.spn109",
+        "can2.spn111",
+        "can2.spn91",
+        "can2.spn92",
+        "can2.spn183",
+        "can2.spn184",
+        "can2.spn185",
+        "can2.spn247",
+        "can2.spn249",
+        "can2.spn959",
+        "can2.spn960",
+        "can2.spn961",
+        "can2.spn962",
+        "can2.spn963",
+        "can2.spn964",
+        "can2.spn250",
+        "can2.spn252",
+        "can2.spn105",
+        "can2.spn81",
+        "can2.spn102",
+        "can2.spn110",
+        "can2.spn174",
+        "can2.spn175",
+        "can2.spn115",
+        "can2.spn168",
+        "events.last",
+        "can2.spn106",
+        "can2.spn173",
+        "can2.spn176",
+        "can2.spn52",
+        "can2.spn1134",
+        "can2.spn114",
+        "can2.spn167"
+      ]
+    },
+    "current_values": {
+      "internal.vsys": 4.17,
+      "internal.vin": 28.09,
+      "can1.spn247": 719.25,
+      "can1.spn249": 61532000,
+      "can1.spn110": 84,
+      "can1.spn183": 9.25,
+      "can1.spn184": 0.0,
+      "can1.spn185": 0.0,
+      "can1.spn51": 0.0,
+      "can1.spn92": 35,
+      "can1.spn2970": 25.2,
+      "can1.spn105": 82,
+      "can1.spn81": 30,
+      "can1.spn512": 0,
+      "can1.spn513": 0,
+      "can1.spn190": 1498.75,
+      "can1.spn1483": 0,
+      "can1.spn2432": 0,
+      "can1.spn100": 300,
+      "can1.spn111": 100.0,
+      "can1.spn167": 28.3,
+      "can2.spn247": 508.85,
+      "can2.spn249": 0,
+      "can2.spn110": 86,
+      "can2.spn174": 41,
+      "can2.spn175": 100.2812,
+      "can2.spn176": null,
+      "can2.spn52": null,
+      "can2.spn1134": null,
+      "can2.spn183": 213.35,
+      "can2.spn184": 0.0938,
+      "can2.spn185": 0.0,
+      "can2.spn91": 83.6,
+      "can2.spn92": 84,
+      "can2.spn105": 43,
+      "can2.spn81": 190,
+      "can2.spn102": 0,
+      "can2.spn106": null,
+      "can2.spn173": null,
+      "can2.spn513": 84,
+      "can2.spn190": 1851.0,
+      "can2.spn1483": 39,
+      "can2.spn94": 620,
+      "can2.spn100": 688,
+      "can2.spn109": 320,
+      "can2.spn111": 100.0,
+      "can2.spn114": null,
+      "can2.spn115": 435,
+      "can2.spn167": null,
+      "can2.spn168": 27.15,
+      "internal.ambient": 50.38,
+      "internal.light": 0,
+      "internal.movement_hrs": 0.0,
+      "internal.state": 0,
+      "internal.accel_x": 1.05,
+      "internal.accel_y": -0.04,
+      "internal.accel_z": -0.07,
+      "internal.roll": -2.3,
+      "internal.pitch": -85.6,
+      "internal.angle": 86.3,
+      "internal.motion": 364,
+      "internal.wifi_ip": "192.168.100.179",
+      "internal.wifi_rssi": -20
+    },
+    "can_bus": {
+      "can1": {
+        "total_frames": 14,
+        "known_frames": 11,
+        "unknown_frames": 3,
+        "frames": [
+          {
+            "can_id": 419357952,
+            "can_id_hex": "0x18FEE500",
+            "pgn": 65253,
+            "pgn_hex": "0xFEE5",
+            "source_address": 0,
+            "data": "313800005CF00000",
+            "known": true,
+            "pgn_name": "Engine Hours, Revolutions",
+            "pgn_acronym": "HOURS",
+            "spns": {
+              "247": {
+                "value": 719.25,
+                "name": "Engine Total Hours of Operation",
+                "unit": "h"
+              },
+              "249": {
+                "value": 61532000,
+                "name": "Engine Total Revolutions",
+                "unit": "rev"
+              }
+            }
+          },
+          {
+            "can_id": 419360256,
+            "can_id_hex": "0x18FEEE00",
+            "pgn": 65262,
+            "pgn_hex": "0xFEEE",
+            "source_address": 0,
+            "data": "7CFFFFFFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Engine Temperature 1",
+            "pgn_acronym": "ET1",
+            "spns": {
+              "110": {
+                "value": 84,
+                "name": "Engine Coolant Temperature",
+                "unit": "deg C"
+              },
+              "174": {
+                "value": null,
+                "name": "Fuel Temperature 1",
+                "unit": "deg C"
+              },
+              "175": {
+                "value": null,
+                "name": "Engine Oil Temperature 1",
+                "unit": "deg C"
+              },
+              "176": {
+                "value": null,
+                "name": "Turbo Oil Temperature",
+                "unit": "deg C"
+              },
+              "52": {
+                "value": null,
+                "name": "Engine Intercooler Temperature",
+                "unit": "deg C"
+              },
+              "1134": {
+                "value": null,
+                "name": "Engine Intercooler Thermostat Opening",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419361280,
+            "can_id_hex": "0x18FEF200",
+            "pgn": 65266,
+            "pgn_hex": "0xFEF2",
+            "source_address": 0,
+            "data": "B9000000000000FF",
+            "known": true,
+            "pgn_name": "Fuel Economy (Liquid)",
+            "pgn_acronym": "LFE1",
+            "spns": {
+              "183": {
+                "value": 9.25,
+                "name": "Fuel Rate",
+                "unit": "L/h"
+              },
+              "184": {
+                "value": 0.0,
+                "name": "Instantaneous Fuel Economy",
+                "unit": "km/L"
+              },
+              "185": {
+                "value": 0.0,
+                "name": "Average Fuel Economy",
+                "unit": "km/L"
+              },
+              "51": {
+                "value": 0.0,
+                "name": "Throttle Position",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 217056000,
+            "can_id_hex": "0x0CF00300",
+            "pgn": 61443,
+            "pgn_hex": "0xF003",
+            "source_address": 0,
+            "data": "C3FF23FFFF3FFAE1",
+            "known": true,
+            "pgn_name": "Electronic Engine Controller 2",
+            "pgn_acronym": "EEC2",
+            "spns": {
+              "29": {
+                "value": null,
+                "name": "Accelerator Pedal Low Idle Switch",
+                "unit": ""
+              },
+              "91": {
+                "value": null,
+                "name": "Accelerator Pedal Position 1",
+                "unit": "%"
+              },
+              "92": {
+                "value": 35,
+                "name": "Engine Percent Load At Current Speed",
+                "unit": "%"
+              },
+              "974": {
+                "value": null,
+                "name": "Remote Accelerator Pedal Position",
+                "unit": "%"
+              },
+              "2970": {
+                "value": 25.2,
+                "name": "Accelerator Pedal Position 2",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419356416,
+            "can_id_hex": "0x18FEDF00",
+            "pgn": 65247,
+            "pgn_hex": "0xFEDF",
+            "source_address": 0,
+            "data": "7DC02B7DFBFFFFFC",
+            "known": false
+          },
+          {
+            "can_id": 419362304,
+            "can_id_hex": "0x18FEF600",
+            "pgn": 65270,
+            "pgn_hex": "0xFEF6",
+            "source_address": 0,
+            "data": "FF0F7AFFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Inlet/Exhaust Conditions 1",
+            "pgn_acronym": "IC1",
+            "spns": {
+              "105": {
+                "value": 82,
+                "name": "Intake Manifold 1 Temperature",
+                "unit": "deg C"
+              },
+              "81": {
+                "value": 30,
+                "name": "Intake Manifold 1 Pressure",
+                "unit": "kPa"
+              },
+              "102": {
+                "value": null,
+                "name": "Boost Pressure",
+                "unit": "kPa"
+              },
+              "106": {
+                "value": null,
+                "name": "Air Inlet Pressure",
+                "unit": "kPa"
+              },
+              "173": {
+                "value": null,
+                "name": "Exhaust Gas Temperature",
+                "unit": "deg C"
+              }
+            }
+          },
+          {
+            "can_id": 419360256,
+            "can_id_hex": "0x18FEEE00",
+            "pgn": 65262,
+            "pgn_hex": "0xFEEE",
+            "source_address": 0,
+            "data": "7CFFFFFFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Engine Temperature 1",
+            "pgn_acronym": "ET1",
+            "spns": {
+              "110": {
+                "value": 84,
+                "name": "Engine Coolant Temperature",
+                "unit": "deg C"
+              },
+              "174": {
+                "value": null,
+                "name": "Fuel Temperature 1",
+                "unit": "deg C"
+              },
+              "175": {
+                "value": null,
+                "name": "Engine Oil Temperature 1",
+                "unit": "deg C"
+              },
+              "176": {
+                "value": null,
+                "name": "Turbo Oil Temperature",
+                "unit": "deg C"
+              },
+              "52": {
+                "value": null,
+                "name": "Engine Intercooler Temperature",
+                "unit": "deg C"
+              },
+              "1134": {
+                "value": null,
+                "name": "Engine Intercooler Thermostat Opening",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419362304,
+            "can_id_hex": "0x18FEF600",
+            "pgn": 65270,
+            "pgn_hex": "0xFEF6",
+            "source_address": 0,
+            "data": "FF0F7AFFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Inlet/Exhaust Conditions 1",
+            "pgn_acronym": "IC1",
+            "spns": {
+              "105": {
+                "value": 82,
+                "name": "Intake Manifold 1 Temperature",
+                "unit": "deg C"
+              },
+              "81": {
+                "value": 30,
+                "name": "Intake Manifold 1 Pressure",
+                "unit": "kPa"
+              },
+              "102": {
+                "value": null,
+                "name": "Boost Pressure",
+                "unit": "kPa"
+              },
+              "106": {
+                "value": null,
+                "name": "Air Inlet Pressure",
+                "unit": "kPa"
+              },
+              "173": {
+                "value": null,
+                "name": "Exhaust Gas Temperature",
+                "unit": "deg C"
+              }
+            }
+          },
+          {
+            "can_id": 217056256,
+            "can_id_hex": "0x0CF00400",
+            "pgn": 61444,
+            "pgn_hex": "0xF004",
+            "source_address": 0,
+            "data": "0E7D7DD62E000F7D",
+            "known": true,
+            "pgn_name": "Electronic Engine Controller 1",
+            "pgn_acronym": "EEC1",
+            "spns": {
+              "899": {
+                "value": null,
+                "name": "Engine Torque Mode",
+                "unit": ""
+              },
+              "512": {
+                "value": 0,
+                "name": "Driver's Demand Engine Torque",
+                "unit": "%"
+              },
+              "513": {
+                "value": 0,
+                "name": "Actual Engine Torque",
+                "unit": "%"
+              },
+              "190": {
+                "value": 1498.75,
+                "name": "Engine Speed",
+                "unit": "rpm"
+              },
+              "1483": {
+                "value": 0,
+                "name": "Source Address of Engine Controller",
+                "unit": ""
+              },
+              "2432": {
+                "value": 0,
+                "name": "Engine Demand Torque",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419360512,
+            "can_id_hex": "0x18FEEF00",
+            "pgn": 65263,
+            "pgn_hex": "0xFEEF",
+            "source_address": 0,
+            "data": "FFFFFF4BFFFFFFFA",
+            "known": true,
+            "pgn_name": "Engine Fluid Level/Pressure 1",
+            "pgn_acronym": "EFL/P1",
+            "spns": {
+              "94": {
+                "value": null,
+                "name": "Fuel Delivery Pressure",
+                "unit": "kPa"
+              },
+              "22": {
+                "value": null,
+                "name": "Extended Crankcase Blow-by Pressure",
+                "unit": "kPa"
+              },
+              "98": {
+                "value": null,
+                "name": "Engine Oil Level",
+                "unit": "%"
+              },
+              "100": {
+                "value": 300,
+                "name": "Engine Oil Pressure",
+                "unit": "kPa"
+              },
+              "101": {
+                "value": null,
+                "name": "Crankcase Pressure",
+                "unit": "kPa"
+              },
+              "109": {
+                "value": null,
+                "name": "Engine Coolant Pressure",
+                "unit": "kPa"
+              },
+              "111": {
+                "value": 100.0,
+                "name": "Engine Coolant Level",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419362560,
+            "can_id_hex": "0x18FEF700",
+            "pgn": 65271,
+            "pgn_hex": "0xFEF7",
+            "source_address": 0,
+            "data": "FFFFFFFF3602FFFF",
+            "known": true,
+            "pgn_name": "Vehicle Electrical Power 1",
+            "pgn_acronym": "VEP1",
+            "spns": {
+              "114": {
+                "value": null,
+                "name": "Net Battery Current",
+                "unit": "A"
+              },
+              "115": {
+                "value": null,
+                "name": "Alternator Current",
+                "unit": "A"
+              },
+              "167": {
+                "value": 28.3,
+                "name": "Charging System Potential",
+                "unit": "V"
+              },
+              "168": {
+                "value": null,
+                "name": "Battery Potential",
+                "unit": "V"
+              }
+            }
+          },
+          {
+            "can_id": 419363840,
+            "can_id_hex": "0x18FEFC00",
+            "pgn": 65276,
+            "pgn_hex": "0xFEFC",
+            "source_address": 0,
+            "data": "FF00FF00FFFF0000",
+            "known": false
+          },
+          {
+            "can_id": 419362816,
+            "can_id_hex": "0x18FEF800",
+            "pgn": 65272,
+            "pgn_hex": "0xFEF8",
+            "source_address": 0,
+            "data": "FFFFFF002022FFFF",
+            "known": false
+          },
+          {
+            "can_id": 419360512,
+            "can_id_hex": "0x18FEEF00",
+            "pgn": 65263,
+            "pgn_hex": "0xFEEF",
+            "source_address": 0,
+            "data": "FFFFFF4BFFFFFFFA",
+            "known": true,
+            "pgn_name": "Engine Fluid Level/Pressure 1",
+            "pgn_acronym": "EFL/P1",
+            "spns": {
+              "94": {
+                "value": null,
+                "name": "Fuel Delivery Pressure",
+                "unit": "kPa"
+              },
+              "22": {
+                "value": null,
+                "name": "Extended Crankcase Blow-by Pressure",
+                "unit": "kPa"
+              },
+              "98": {
+                "value": null,
+                "name": "Engine Oil Level",
+                "unit": "%"
+              },
+              "100": {
+                "value": 300,
+                "name": "Engine Oil Pressure",
+                "unit": "kPa"
+              },
+              "101": {
+                "value": null,
+                "name": "Crankcase Pressure",
+                "unit": "kPa"
+              },
+              "109": {
+                "value": null,
+                "name": "Engine Coolant Pressure",
+                "unit": "kPa"
+              },
+              "111": {
+                "value": 100.0,
+                "name": "Engine Coolant Level",
+                "unit": "%"
+              }
+            }
+          }
+        ],
+        "unavailable_spns": [
+          {
+            "spn": "174",
+            "name": "Fuel Temperature 1",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "175",
+            "name": "Engine Oil Temperature 1",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "176",
+            "name": "Turbo Oil Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "52",
+            "name": "Engine Intercooler Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "1134",
+            "name": "Engine Intercooler Thermostat Opening",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "29",
+            "name": "Accelerator Pedal Low Idle Switch",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "91",
+            "name": "Accelerator Pedal Position 1",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "974",
+            "name": "Remote Accelerator Pedal Position",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "102",
+            "name": "Boost Pressure",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "106",
+            "name": "Air Inlet Pressure",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "173",
+            "name": "Exhaust Gas Temperature",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "174",
+            "name": "Fuel Temperature 1",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "175",
+            "name": "Engine Oil Temperature 1",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "176",
+            "name": "Turbo Oil Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "52",
+            "name": "Engine Intercooler Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "1134",
+            "name": "Engine Intercooler Thermostat Opening",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "102",
+            "name": "Boost Pressure",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "106",
+            "name": "Air Inlet Pressure",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "173",
+            "name": "Exhaust Gas Temperature",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "899",
+            "name": "Engine Torque Mode",
+            "pgn": 61444,
+            "pgn_acronym": "EEC1"
+          },
+          {
+            "spn": "94",
+            "name": "Fuel Delivery Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "22",
+            "name": "Extended Crankcase Blow-by Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "98",
+            "name": "Engine Oil Level",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "101",
+            "name": "Crankcase Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "109",
+            "name": "Engine Coolant Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "114",
+            "name": "Net Battery Current",
+            "pgn": 65271,
+            "pgn_acronym": "VEP1"
+          },
+          {
+            "spn": "115",
+            "name": "Alternator Current",
+            "pgn": 65271,
+            "pgn_acronym": "VEP1"
+          },
+          {
+            "spn": "168",
+            "name": "Battery Potential",
+            "pgn": 65271,
+            "pgn_acronym": "VEP1"
+          },
+          {
+            "spn": "94",
+            "name": "Fuel Delivery Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "22",
+            "name": "Extended Crankcase Blow-by Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "98",
+            "name": "Engine Oil Level",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "101",
+            "name": "Crankcase Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "109",
+            "name": "Engine Coolant Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          }
+        ]
+      },
+      "can2": {
+        "total_frames": 9,
+        "known_frames": 8,
+        "unknown_frames": 1,
+        "frames": [
+          {
+            "can_id": 419357952,
+            "can_id_hex": "0x18FEE500",
+            "pgn": 65253,
+            "pgn_hex": "0xFEE5",
+            "source_address": 0,
+            "data": "C127000000000000",
+            "known": true,
+            "pgn_name": "Engine Hours, Revolutions",
+            "pgn_acronym": "HOURS",
+            "spns": {
+              "247": {
+                "value": 508.85,
+                "name": "Engine Total Hours of Operation",
+                "unit": "h"
+              },
+              "249": {
+                "value": 0,
+                "name": "Engine Total Revolutions",
+                "unit": "rev"
+              }
+            }
+          },
+          {
+            "can_id": 419360256,
+            "can_id_hex": "0x18FEEE00",
+            "pgn": 65262,
+            "pgn_hex": "0xFEEE",
+            "source_address": 0,
+            "data": "7E51A92EFFFFFFFF",
+            "known": true,
+            "pgn_name": "Engine Temperature 1",
+            "pgn_acronym": "ET1",
+            "spns": {
+              "110": {
+                "value": 86,
+                "name": "Engine Coolant Temperature",
+                "unit": "deg C"
+              },
+              "174": {
+                "value": 41,
+                "name": "Fuel Temperature 1",
+                "unit": "deg C"
+              },
+              "175": {
+                "value": 100.2812,
+                "name": "Engine Oil Temperature 1",
+                "unit": "deg C"
+              },
+              "176": {
+                "value": null,
+                "name": "Turbo Oil Temperature",
+                "unit": "deg C"
+              },
+              "52": {
+                "value": null,
+                "name": "Engine Intercooler Temperature",
+                "unit": "deg C"
+              },
+              "1134": {
+                "value": null,
+                "name": "Engine Intercooler Thermostat Opening",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419361280,
+            "can_id_hex": "0x18FEF200",
+            "pgn": 65266,
+            "pgn_hex": "0xFEF2",
+            "source_address": 0,
+            "data": "AB1030000000FFFF",
+            "known": true,
+            "pgn_name": "Fuel Economy (Liquid)",
+            "pgn_acronym": "LFE1",
+            "spns": {
+              "183": {
+                "value": 213.35,
+                "name": "Fuel Rate",
+                "unit": "L/h"
+              },
+              "184": {
+                "value": 0.0938,
+                "name": "Instantaneous Fuel Economy",
+                "unit": "km/L"
+              },
+              "185": {
+                "value": 0.0,
+                "name": "Average Fuel Economy",
+                "unit": "km/L"
+              },
+              "51": {
+                "value": null,
+                "name": "Throttle Position",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 217056000,
+            "can_id_hex": "0x0CF00300",
+            "pgn": 61443,
+            "pgn_hex": "0xF003",
+            "source_address": 0,
+            "data": "FFD154FFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Electronic Engine Controller 2",
+            "pgn_acronym": "EEC2",
+            "spns": {
+              "29": {
+                "value": null,
+                "name": "Accelerator Pedal Low Idle Switch",
+                "unit": ""
+              },
+              "91": {
+                "value": 83.6,
+                "name": "Accelerator Pedal Position 1",
+                "unit": "%"
+              },
+              "92": {
+                "value": 84,
+                "name": "Engine Percent Load At Current Speed",
+                "unit": "%"
+              },
+              "974": {
+                "value": null,
+                "name": "Remote Accelerator Pedal Position",
+                "unit": "%"
+              },
+              "2970": {
+                "value": null,
+                "name": "Accelerator Pedal Position 2",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419362304,
+            "can_id_hex": "0x18FEF600",
+            "pgn": 65270,
+            "pgn_hex": "0xFEF6",
+            "source_address": 0,
+            "data": "005F53FFFFFFFFFF",
+            "known": true,
+            "pgn_name": "Inlet/Exhaust Conditions 1",
+            "pgn_acronym": "IC1",
+            "spns": {
+              "105": {
+                "value": 43,
+                "name": "Intake Manifold 1 Temperature",
+                "unit": "deg C"
+              },
+              "81": {
+                "value": 190,
+                "name": "Intake Manifold 1 Pressure",
+                "unit": "kPa"
+              },
+              "102": {
+                "value": 0,
+                "name": "Boost Pressure",
+                "unit": "kPa"
+              },
+              "106": {
+                "value": null,
+                "name": "Air Inlet Pressure",
+                "unit": "kPa"
+              },
+              "173": {
+                "value": null,
+                "name": "Exhaust Gas Temperature",
+                "unit": "deg C"
+              }
+            }
+          },
+          {
+            "can_id": 217056256,
+            "can_id_hex": "0x0CF00400",
+            "pgn": 61444,
+            "pgn_hex": "0xF004",
+            "source_address": 0,
+            "data": "0FFFD1D83927F4FF",
+            "known": true,
+            "pgn_name": "Electronic Engine Controller 1",
+            "pgn_acronym": "EEC1",
+            "spns": {
+              "899": {
+                "value": null,
+                "name": "Engine Torque Mode",
+                "unit": ""
+              },
+              "512": {
+                "value": null,
+                "name": "Driver's Demand Engine Torque",
+                "unit": "%"
+              },
+              "513": {
+                "value": 84,
+                "name": "Actual Engine Torque",
+                "unit": "%"
+              },
+              "190": {
+                "value": 1851.0,
+                "name": "Engine Speed",
+                "unit": "rpm"
+              },
+              "1483": {
+                "value": 39,
+                "name": "Source Address of Engine Controller",
+                "unit": ""
+              },
+              "2432": {
+                "value": null,
+                "name": "Engine Demand Torque",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419360512,
+            "can_id_hex": "0x18FEEF00",
+            "pgn": 65263,
+            "pgn_hex": "0xFEEF",
+            "source_address": 0,
+            "data": "9BFFFFACFFFFA0FA",
+            "known": true,
+            "pgn_name": "Engine Fluid Level/Pressure 1",
+            "pgn_acronym": "EFL/P1",
+            "spns": {
+              "94": {
+                "value": 620,
+                "name": "Fuel Delivery Pressure",
+                "unit": "kPa"
+              },
+              "22": {
+                "value": null,
+                "name": "Extended Crankcase Blow-by Pressure",
+                "unit": "kPa"
+              },
+              "98": {
+                "value": null,
+                "name": "Engine Oil Level",
+                "unit": "%"
+              },
+              "100": {
+                "value": 688,
+                "name": "Engine Oil Pressure",
+                "unit": "kPa"
+              },
+              "101": {
+                "value": null,
+                "name": "Crankcase Pressure",
+                "unit": "kPa"
+              },
+              "109": {
+                "value": 320,
+                "name": "Engine Coolant Pressure",
+                "unit": "kPa"
+              },
+              "111": {
+                "value": 100.0,
+                "name": "Engine Coolant Level",
+                "unit": "%"
+              }
+            }
+          },
+          {
+            "can_id": 419362560,
+            "can_id_hex": "0x18FEF700",
+            "pgn": 65271,
+            "pgn_hex": "0xFEF7",
+            "source_address": 0,
+            "data": "FFFF3002FFFF1F02",
+            "known": true,
+            "pgn_name": "Vehicle Electrical Power 1",
+            "pgn_acronym": "VEP1",
+            "spns": {
+              "114": {
+                "value": null,
+                "name": "Net Battery Current",
+                "unit": "A"
+              },
+              "115": {
+                "value": 435,
+                "name": "Alternator Current",
+                "unit": "A"
+              },
+              "167": {
+                "value": null,
+                "name": "Charging System Potential",
+                "unit": "V"
+              },
+              "168": {
+                "value": 27.15,
+                "name": "Battery Potential",
+                "unit": "V"
+              }
+            }
+          },
+          {
+            "can_id": 419362816,
+            "can_id_hex": "0x18FEF800",
+            "pgn": 65272,
+            "pgn_hex": "0xFEF8",
+            "source_address": 0,
+            "data": "FFFFFF731B2AFFFF",
+            "known": false
+          }
+        ],
+        "unavailable_spns": [
+          {
+            "spn": "176",
+            "name": "Turbo Oil Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "52",
+            "name": "Engine Intercooler Temperature",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "1134",
+            "name": "Engine Intercooler Thermostat Opening",
+            "pgn": 65262,
+            "pgn_acronym": "ET1"
+          },
+          {
+            "spn": "51",
+            "name": "Throttle Position",
+            "pgn": 65266,
+            "pgn_acronym": "LFE1"
+          },
+          {
+            "spn": "29",
+            "name": "Accelerator Pedal Low Idle Switch",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "974",
+            "name": "Remote Accelerator Pedal Position",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "2970",
+            "name": "Accelerator Pedal Position 2",
+            "pgn": 61443,
+            "pgn_acronym": "EEC2"
+          },
+          {
+            "spn": "106",
+            "name": "Air Inlet Pressure",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "173",
+            "name": "Exhaust Gas Temperature",
+            "pgn": 65270,
+            "pgn_acronym": "IC1"
+          },
+          {
+            "spn": "899",
+            "name": "Engine Torque Mode",
+            "pgn": 61444,
+            "pgn_acronym": "EEC1"
+          },
+          {
+            "spn": "512",
+            "name": "Driver's Demand Engine Torque",
+            "pgn": 61444,
+            "pgn_acronym": "EEC1"
+          },
+          {
+            "spn": "2432",
+            "name": "Engine Demand Torque",
+            "pgn": 61444,
+            "pgn_acronym": "EEC1"
+          },
+          {
+            "spn": "22",
+            "name": "Extended Crankcase Blow-by Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "98",
+            "name": "Engine Oil Level",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "101",
+            "name": "Crankcase Pressure",
+            "pgn": 65263,
+            "pgn_acronym": "EFL/P1"
+          },
+          {
+            "spn": "114",
+            "name": "Net Battery Current",
+            "pgn": 65271,
+            "pgn_acronym": "VEP1"
+          },
+          {
+            "spn": "167",
+            "name": "Charging System Potential",
+            "pgn": 65271,
+            "pgn_acronym": "VEP1"
+          }
+        ]
+      }
+    }
+  },
+  "issues": []
+}
