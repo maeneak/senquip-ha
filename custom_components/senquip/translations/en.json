@@ -17,18 +17,28 @@
             "discover": {
                 "title": "Discovering Sensors"
             },
-            "select_profiles": {
-                "title": "J1939 Profiles",
-                "description": "Select manufacturer profiles for CAN bus decoding. Profiles override built-in J1939 definitions.",
+            "configure_ports": {
+                "title": "Configure Ports",
+                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays. Only profiles matching the selected protocol will be applied.",
                 "data": {
-                    "j1939_profiles": "Profiles"
+                    "port_configs": "Port Configuration",
+                    "protocol_can1": "CAN 1 Protocol",
+                    "protocol_can2": "CAN 2 Protocol",
+                    "profiles_can1": "CAN 1 Profiles",
+                    "profiles_can2": "CAN 2 Profiles"
+                },
+                "data_description": {
+                    "protocol_can1": "Select the CAN protocol for CAN 1 port",
+                    "protocol_can2": "Select the CAN protocol for CAN 2 port",
+                    "profiles_can1": "Select profile overlays for CAN 1. Profiles not matching the selected protocol are ignored.",
+                    "profiles_can2": "Select profile overlays for CAN 2. Profiles not matching the selected protocol are ignored."
                 }
             },
-            "select_sensors": {
-                "title": "Select Sensors",
-                "description": "Found {sensor_count} sensors on device **{device_id}**. Select which sensors to create.",
+            "select_signals": {
+                "title": "Select Signals",
+                "description": "Found {signal_count} signals on device **{device_id}**. Select which signals to create.",
                 "data": {
-                    "selected_sensors": "Sensors"
+                    "selected_signals": "Signals"
                 }
             },
             "discovery_failed": {
@@ -54,18 +64,28 @@
             "discover": {
                 "title": "Re-discovering Sensors"
             },
-            "select_profiles": {
-                "title": "J1939 Profiles",
-                "description": "Select manufacturer profiles for CAN bus decoding. Profiles override built-in J1939 definitions.",
+            "configure_ports": {
+                "title": "Configure Ports",
+                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays. Only profiles matching the selected protocol will be applied.",
                 "data": {
-                    "j1939_profiles": "Profiles"
+                    "port_configs": "Port Configuration",
+                    "protocol_can1": "CAN 1 Protocol",
+                    "protocol_can2": "CAN 2 Protocol",
+                    "profiles_can1": "CAN 1 Profiles",
+                    "profiles_can2": "CAN 2 Profiles"
+                },
+                "data_description": {
+                    "protocol_can1": "Select the CAN protocol for CAN 1 port",
+                    "protocol_can2": "Select the CAN protocol for CAN 2 port",
+                    "profiles_can1": "Select profile overlays for CAN 1. Profiles not matching the selected protocol are ignored.",
+                    "profiles_can2": "Select profile overlays for CAN 2. Profiles not matching the selected protocol are ignored."
                 }
             },
-            "select_sensors": {
-                "title": "Select Sensors",
-                "description": "Found {sensor_count} sensors on device **{device_id}**. Update your sensor selection.",
+            "select_signals": {
+                "title": "Select Signals",
+                "description": "Found {signal_count} signals on device **{device_id}**. Update your signal selection.",
                 "data": {
-                    "selected_sensors": "Sensors"
+                    "selected_signals": "Signals"
                 }
             },
             "discovery_failed": {

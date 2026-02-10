@@ -1,93 +1,140 @@
-# Copilot Instructions — Senquip HA Integration
+# Copilot Instructions - Senquip HA Integration
 
 ## What This Is
 
-A Home Assistant custom integration for Senquip QUAD-C2 telemetry devices. Subscribes to MQTT, decodes J1939 CAN bus frames from two marine engines (CAN1: Cummins QSB4.5, CAN2: MAN D2862-LE466), and exposes sensor entities. Still in active development — no backward compatibility or migration code required.
+A Home Assistant custom integration for Senquip QUAD-C2 telemetry devices. It subscribes to MQTT JSON payloads, decodes internal signals and CAN data, and exposes selected signals as HA sensors.
+
+The CAN stack is now protocol-first:
+
+- J1939 decoded mode
+- NMEA2000 raw mode
+- ISO11783 raw mode
+- CANopen raw mode
+
+No backward compatibility is required for pre-refactor config/signal formats.
 
 ## Architecture
 
-**Data flow:** MQTT → `SenquipDataCoordinator._parse_payload()` → `J1939Decoder` → flat `{sensor_key: value}` dict → `CoordinatorEntity` sensors
+Data flow:
+
+- MQTT -> `SenquipDataCoordinator._parse_payload()` -> protocol adapter decode -> flat `{signal_key: value}` -> `CoordinatorEntity` sensors
+
+### Core modules
 
 | Module | Role |
-|--------|------|
-| `__init__.py` | `SenquipDataCoordinator` — MQTT subscription, `_parse_payload()` extracts sensors from JSON. Per-port decoders (`self._decoders`). DM1 faults handled separately with 8 keys per port. |
-| `j1939_decoder.py` | `J1939Decoder` — `extract_pgn()`, `decode_spn()`, `decode_dm1()`, `decode_can_port()`. DM1 supports both standard LE and MAN big-endian SPN encoding via `DM1Config`. |
-| `j1939_database.py` | Built-in PGN/SPN definitions. `PGNDefinition` and `SPNDefinition` frozen dataclasses. `start_byte` is **1-indexed** in definitions, converted to 0-indexed in `decode_spn()`. |
-| `j1939_profile_loader.py` | Loads JSON profiles from `j1939_custom/`. `merge_databases()` → `(pgn_db, spn_db, dm1_config)`. Cross-references validated per-profile, not across merged output. |
-| `config_flow.py` | Multi-step UI: topic → MQTT discovery (60s) → profile selection → sensor selection. `_classify_payload()` always adds DM1 sensors for active CAN ports. |
-| `sensor.py` | `_resolve_sensor_meta()` routes by key pattern. `_build_device_info()` creates CAN sub-devices via `via_device`. |
-| `const.py` | `SensorMeta` dataclass (defaults `state_class=MEASUREMENT` — set `None` explicitly for non-measurements), `SPN_UNIT_TO_HA`, `KNOWN_INTERNAL_SENSORS`. |
+| --- | --- |
+| `custom_components/senquip/__init__.py` | Coordinator runtime. Builds per-port protocol decoders from `port_configs`; parses payload to canonical signal keys. |
+| `custom_components/senquip/config_flow.py` | Config flow and options flow: `user -> discover -> configure_ports -> select_signals`. |
+| `custom_components/senquip/const.py` | Config keys, known port families, `PortConfig`, `SensorMeta`, internal sensor metadata, SPN-to-HA unit mapping. |
+| `custom_components/senquip/sensor.py` | Metadata resolution from canonical keys and device grouping (base + CAN sub-devices). |
+| `custom_components/senquip/diagnostics.py` | Diagnostics payload using `selected_signals`, `port_configs`, and protocol-aware CAN summaries. |
+| `custom_components/senquip/can_protocols/base.py` | CAN protocol interface and discovered-signal type. |
+| `custom_components/senquip/can_protocols/registry.py` | Protocol registry/options. |
+| `custom_components/senquip/can_protocols/j1939/*` | J1939 database, decoder, overlay parsing, protocol adapter. |
+| `custom_components/senquip/can_protocols/raw.py` | Raw protocol adapter used by NMEA2000/ISO11783/CANopen. |
+| `custom_components/senquip/can_profiles/loader.py` | Generic CAN profile loading and schema validation. |
+| `custom_components/senquip/can_profiles/*.json` | Profile files (for example `man_d2862.json`). |
 
-### Sensor Key Patterns
+## Config Entry Schema
 
-- `internal.{json_key}` — flat JSON values (vsys, vin, ambient, etc.)
-- `{port}.spn{num}` — decoded J1939 SPNs (e.g. `can1.spn190`)
-- `{port}.dm1.{field}` — 8 DM1 fields: `protect_lamp`, `amber_warning`, `red_stop`, `mil`, `active_spn`, `active_fmi`, `active_fault`, `occurrence_count`
-- `{port}.raw.{pgn}` — unknown PGN hex data
-- `events.last` — last event message
+- `selected_signals`: list of canonical signal keys
+- `port_configs`: per-port config object
 
-### Profile System
+`port_configs` includes known families:
 
-JSON profiles in `j1939_custom/` override built-in PGN/SPN definitions. Each profile must have internally consistent cross-references (every SPN in a PGN's `spns` list must be defined, and vice versa). Cross-references are validated within each profile, not across the merged database. The `dm1` section configures DM1 encoding per port.
+- `internal`, `can1`, `can2`, `serial1`, `input1`, `input2`, `output1`, `current1`, `current2`, `ble`, `gps`
 
-### DM1/DTC Decoding
+CAN entries include:
 
-DM1 (PGN 65226) uses a different byte format than normal SPNs and is handled separately from `decode_frame()`. The `dm1.ports` field in profiles controls which CAN ports use big-endian SPN encoding; unlisted ports default to standard J1939 little-endian. This allows one device to decode both CAN1 (Cummins LE) and CAN2 (MAN BE) simultaneously.
+- `family: "can"`
+- `active: bool`
+- `protocol: str`
+- `profiles: list[str]`
 
-## Running Tests
+## Canonical Signal Key Patterns
 
-```bash
-pytest tests/                              # all tests
-pytest tests/test_j1939_decoder.py -k "test_extract_pgn"  # single test
+- `internal.main.<json_key>`
+- `can.<port>.<protocol>.spn<num>` (J1939 decoded)
+- `can.<port>.<protocol>.dm1.<field>` (J1939 DM1)
+- `can.<port>.<protocol>.raw.<pgn>` (raw/unknown frames)
+- `event.main.last`
+
+## Profile System
+
+Profiles live under:
+
+- `custom_components/senquip/can_profiles/`
+
+Schema:
+
+```json
+{
+  "name": "Profile Name",
+  "base_protocol": "j1939",
+  "description": "Optional description",
+  "protocol_data": {
+    "j1939": {
+      "pgns": {},
+      "spns": {},
+      "dm1": {}
+    }
+  }
+}
 ```
 
-Tests run **without Home Assistant installed** — `tests/conftest.py` injects HA stubs from `tests/ha_stubs.py` into `sys.modules`.
+J1939 overlay validation rules:
 
-### Test Conventions
+- PGN references must point to defined SPNs in that profile section.
+- SPN `pgn` references must point to defined PGNs in that profile section.
+- Validation is per profile section, not across merged output.
 
-- **Class-based grouping**: `class TestFeatureName:` with `test_descriptive_snake_case` methods
-- **Parametrize**: `@pytest.mark.parametrize("input, expected, description", [...])` with assertion messages
-- **Fixtures**: function-scoped `@pytest.fixture`, e.g. `decoder()` returning `J1939Decoder()`
-- **Helpers**: module-level `_helper_name()` prefixed with underscore
-- **No mocking of integration code** — tests import functions directly or reimplement them standalone
-- **`test_parse_payload.py` reimplements `_parse_payload`** as a standalone function mirroring `__init__.py`. Changes to source must be mirrored here.
+## DM1/DTC
 
-## Dev Environment
+DM1 (PGN 65226) is decoded separately from normal SPNs.
+
+- Standard little-endian DM1 supported
+- MAN big-endian DM1 supported via profile `dm1.spn_encoding` and optional `dm1.ports`
+
+## Tests
+
+Run all:
 
 ```bash
-cd dev-tools && docker compose up        # HA + Mosquitto + MQTT publisher
-docker compose restart homeassistant     # pick up code changes
+pytest tests/
 ```
 
-7 test scenarios in `dev-tools/mqtt-publisher/scenarios/`. See `dev-tools/README.md` for full setup, multi-device simulation, and standalone usage.
+Current notable tests:
+
+- `tests/test_j1939_decoder.py`
+- `tests/test_j1939_profile_loader.py`
+- `tests/test_parse_payload.py`
+- `tests/test_classify_payload.py`
+- `tests/test_resolve_sensor_meta.py`
+- `tests/test_can_protocol_registry.py`
+- `tests/test_config_flow_ports.py`
+- `tests/test_config_flow_steps.py`
+- `tests/test_raw_protocol.py`
+
+Tests run without Home Assistant installed by using stubs in:
+
+- `tests/ha_stubs.py`
+- `tests/conftest.py`
+
+If new HA imports are added, update both stubs and module registration.
 
 ## Critical Rules
 
-1. **HA stub updates required**: Any new `homeassistant.*` import in integration code needs updates in BOTH `tests/ha_stubs.py` (class/constant) AND `tests/conftest.py` (module registration)
-2. **All dataclasses are `frozen=True`**: `SPNDefinition`, `PGNDefinition`, `DM1Config`, `DM1Result`, `SensorMeta` are immutable
-3. **Profile cross-references are per-profile**: A profile's SPN→PGN and PGN→SPN references must be internally consistent; validation doesn't check the merged database
-4. **DM1 empty ports = ALL ports**: An empty `ports` tuple in `DM1Config` means "apply to all ports", not "no ports"
-5. **Don't shadow `field`**: Never use `field` as a loop variable when `dataclasses.field` is imported
-6. **MAN VEP1 quirk**: SPN 168 is at byte 7, not byte 5, despite MAN PDF suggesting otherwise — confirmed by live data (bytes 5-6 = 0xFFFF)
-7. **SPN 962 = Day, SPN 963 = Month**: Standard J1939 ordering is counterintuitive
-
-## Key Return Signatures
-
-```python
-merge_databases(base_pgn, base_spn, profiles) → tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None]
-decode_can_port(frames, port)                 → tuple[dict[int, float | None], DM1Result | None]
-load_profile(filepath)                        → tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None]
-```
-
-## Adding New PGNs/SPNs
-
-- **Standard PGNs** go in `j1939_database.py` — follow existing `PGNDefinition`/`SPNDefinition` patterns
-- **Manufacturer-proprietary PGNs** go in profile JSON only (e.g. PGN 65308 in `man_d2862.json`)
-- Use synthetic SPN numbers 800000+ for manufacturer-specific SPNs with no J1939 assignment
-- New units need a `SPN_UNIT_TO_HA` mapping in `const.py`
+1. Dataclasses used for config/definitions are immutable unless there is a strong reason to change that.
+2. `start_byte` in SPN definitions is 1-indexed; decoder logic converts to 0-indexed.
+3. Do not reintroduce legacy config keys (`selected_sensors`, `j1939_profiles`) or legacy signal key patterns.
+4. For raw protocols, signals stay raw (`can.<port>.<protocol>.raw.<pgn>`) until a real decoder is implemented.
+5. Keep profile filtering by `base_protocol` in config flow.
 
 ## Reference Files
 
-- `docs/MAN_D2862_J1939_Interface.md` — complete MAN PDF extraction with all PGN byte layouts, DM1 encoding details, and deviation table
-- `dev-tools/mqtt-publisher/scenarios/` — test payloads matching real device output
-- `diag/` — real diagnostic JSON dumps from HA
+- `README.md`
+- `dev-tools/README.md`
+- `docs/MAN_D2862_J1939_Interface.md`
+- `dev-tools/mqtt-publisher/scenarios/`
+- `diag/`
+

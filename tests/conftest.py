@@ -90,6 +90,7 @@ _ha_helpers_typing.StateType = ha_stubs.StateType
 _vol = MagicMock()
 _vol.Schema = lambda x: x
 _vol.Required = lambda key, **kw: key
+_vol.Optional = lambda key, **kw: key
 
 # Register all modules
 sys.modules.update({

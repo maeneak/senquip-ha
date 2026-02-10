@@ -2,8 +2,8 @@
 
 import pytest
 
-from custom_components.senquip.j1939_decoder import J1939Decoder
-from custom_components.senquip.j1939_database import (
+from custom_components.senquip.can_protocols.j1939.decoder import J1939Decoder
+from custom_components.senquip.can_protocols.j1939.database import (
     PGN_DATABASE,
     SPN_DATABASE,
     SPNDefinition,

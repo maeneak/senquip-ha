@@ -27,7 +27,7 @@ This starts:
 3. Add the **MQTT** integration — set broker to `mosquitto`, port `1883`
 4. Add the **Senquip Telemetry** integration — enter topic `senquip/HE8EV12LF/data`
 5. Wait for device discovery (the publisher is already sending data)
-6. Select J1939 profiles and sensors
+6. Configure active CAN ports (protocol + optional profiles) and select signals
 7. Repeat step 4-6 for the second device on topic `senquip/HD2EKH27F/data`
 
 Changes to the integration source code are picked up on HA restart —
@@ -97,7 +97,7 @@ Each scenario is a **single device JSON object** (not an array). Real devices pu
 | `device_he8ev12lf.json` | HE8EV12LF device — full CAN1+CAN2 data with events (from example.md) |
 | `device_hd2ekh27f.json` | HD2EKH27F device — CAN2 only with custom parameters (from example.md) |
 | `can1_generator.json` | CAN1 only — Cummins QSB4.5 generator (40 frames, standard J1939) |
-| `can2_man_engine.json` | CAN2 only — MAN D2862 main engine (16 frames, requires man_d2862 profile) |
+| `can2_man_engine.json` | CAN2 only — MAN D2862 main engine (16 frames, use `man_d2862.json` profile with J1939 protocol) |
 | `minimal.json` | Bare minimum device — no CAN data, just internal sensors |
 | `with_events.json` | Device with events array for event entity testing |
 | `dm1_faults.json` | DM1 diagnostic faults on both CAN1 (LE) and CAN2 (BE) |
