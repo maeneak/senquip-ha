@@ -63,5 +63,6 @@ async def async_get_config_entry_diagnostics(
         },
         "current_values": coordinator.data or {},
         "can_bus": can_summary,
+        "profile_errors": getattr(coordinator, "_profile_errors", {}),
     }
 

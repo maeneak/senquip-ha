@@ -29,10 +29,10 @@ class RawCANProtocol:
         self.protocol_id = protocol_id
         self.display_name = display_name
 
-    def build_decoder(self, profiles: list[Any]) -> Any:
+    def build_decoder(self, profiles: list[Any]) -> tuple[Any, list[str]]:
         """No decoder state required for raw mode."""
         del profiles
-        return None
+        return None, []
 
     def discover_signals(
         self,

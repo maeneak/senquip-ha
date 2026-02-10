@@ -195,12 +195,19 @@ def merge_j1939_databases(
     base_pgn: dict[int, PGNDefinition],
     base_spn: dict[int, SPNDefinition],
     profiles: list[CANProfile],
-) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None]:
-    """Merge base databases with J1939 sections from selected profiles."""
+) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None, list[str]]:
+    """Merge base databases with J1939 sections from selected profiles.
+
+    Returns (pgn_db, spn_db, dm1_config, errors) where *errors* is a list of
+    human-readable strings describing profiles that failed validation.  Callers
+    should surface these in the config flow or diagnostics rather than silently
+    discarding them.
+    """
 
     merged_pgn = dict(base_pgn)
     merged_spn = dict(base_spn)
     dm1_config: DM1Config | None = None
+    errors: list[str] = []
 
     for profile in profiles:
         if profile.base_protocol != "j1939":
@@ -213,7 +220,9 @@ def merge_j1939_databases(
                 dm1_config = profile_dm1
             _LOGGER.debug("Loaded J1939 profile: %s", profile.filename)
         except ValueError as err:
-            _LOGGER.error("Failed to load profile %s: %s", profile.filename, err)
+            msg = f"Failed to load profile {profile.filename}: {err}"
+            _LOGGER.error(msg)
+            errors.append(msg)
 
-    return merged_pgn, merged_spn, dm1_config
+    return merged_pgn, merged_spn, dm1_config, errors
 

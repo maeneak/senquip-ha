@@ -72,7 +72,7 @@ class TestJ1939Overlay:
         profiles = discover_profiles(profile_path.parent)
         profile = profiles["man_d2862.json"]
 
-        merged_pgn, merged_spn, dm1_config = merge_j1939_databases(
+        merged_pgn, merged_spn, dm1_config, errors = merge_j1939_databases(
             PGN_DATABASE,
             SPN_DATABASE,
             [profile],
@@ -80,6 +80,7 @@ class TestJ1939Overlay:
         assert merged_pgn[65271].spns == (167, 168)
         assert 800001 in merged_spn
         assert dm1_config is not None
+        assert errors == []
 
     def test_cross_reference_validation_raises(self, tmp_path: Path):
         _write_json(

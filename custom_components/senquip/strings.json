@@ -19,7 +19,7 @@
             },
             "configure_ports": {
                 "title": "Configure Ports",
-                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays.",
+                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays. Only profiles matching the selected protocol will be applied.",
                 "data": {
                     "port_configs": "Port Configuration",
                     "protocol_can1": "CAN 1 Protocol",
@@ -30,8 +30,8 @@
                 "data_description": {
                     "protocol_can1": "Select the CAN protocol for CAN 1 port",
                     "protocol_can2": "Select the CAN protocol for CAN 2 port",
-                    "profiles_can1": "Select profile overlays for CAN 1 port",
-                    "profiles_can2": "Select profile overlays for CAN 2 port"
+                    "profiles_can1": "Select profile overlays for CAN 1. Profiles not matching the selected protocol are ignored.",
+                    "profiles_can2": "Select profile overlays for CAN 2. Profiles not matching the selected protocol are ignored."
                 }
             },
             "select_signals": {
@@ -66,7 +66,7 @@
             },
             "configure_ports": {
                 "title": "Configure Ports",
-                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays.",
+                "description": "Configure active CAN ports by selecting the protocol and optional profile overlays. Only profiles matching the selected protocol will be applied.",
                 "data": {
                     "port_configs": "Port Configuration",
                     "protocol_can1": "CAN 1 Protocol",
@@ -77,8 +77,8 @@
                 "data_description": {
                     "protocol_can1": "Select the CAN protocol for CAN 1 port",
                     "protocol_can2": "Select the CAN protocol for CAN 2 port",
-                    "profiles_can1": "Select profile overlays for CAN 1 port",
-                    "profiles_can2": "Select profile overlays for CAN 2 port"
+                    "profiles_can1": "Select profile overlays for CAN 1. Profiles not matching the selected protocol are ignored.",
+                    "profiles_can2": "Select profile overlays for CAN 2. Profiles not matching the selected protocol are ignored."
                 }
             },
             "select_signals": {

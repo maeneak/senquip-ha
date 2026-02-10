@@ -1,13 +1,15 @@
 """Tests for sensor metadata resolution with canonical keys."""
 
 from custom_components.senquip.can_protocols.j1939.protocol import J1939CANProtocol
+from custom_components.senquip.const import EntityCategory
 from custom_components.senquip.sensor import _resolve_sensor_meta
 
 
 class _CoordinatorStub:
     def __init__(self):
         protocol = J1939CANProtocol()
-        self._can_runtime = {"can1": (protocol, protocol.build_decoder([]))}
+        decoder, _errors = protocol.build_decoder([])
+        self._can_runtime = {"can1": (protocol, decoder)}
 
 
 class TestResolveInternal:
@@ -40,4 +42,7 @@ class TestResolveEvent:
     def test_event(self):
         meta = _resolve_sensor_meta("event.main.last", _CoordinatorStub())
         assert meta.name == "Last Event"
+        assert meta.state_class is None
+        assert meta.entity_category == EntityCategory.DIAGNOSTIC
+        assert meta.icon == "mdi:alert-circle-outline"
 

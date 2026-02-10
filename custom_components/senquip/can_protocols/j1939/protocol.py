@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...const import SPN_UNIT_TO_HA, SensorMeta
+from ...const import SPN_UNIT_TO_HA, EntityCategory, SensorMeta, SensorStateClass
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
@@ -18,9 +18,9 @@ class J1939CANProtocol:
     protocol_id = "j1939"
     display_name = "J1939"
 
-    def build_decoder(self, profiles: list[CANProfile]) -> J1939Decoder:
-        pgn_db, spn_db, dm1_config = merge_j1939_databases(PGN_DATABASE, SPN_DATABASE, profiles)
-        return J1939Decoder(pgn_db, spn_db, dm1_config)
+    def build_decoder(self, profiles: list[CANProfile]) -> tuple[J1939Decoder, list[str]]:
+        pgn_db, spn_db, dm1_config, errors = merge_j1939_databases(PGN_DATABASE, SPN_DATABASE, profiles)
+        return J1939Decoder(pgn_db, spn_db, dm1_config), errors
 
     def discover_signals(
         self,
@@ -248,7 +248,11 @@ class J1939CANProtocol:
             if mapping:
                 device_class, unit, state_class = mapping
             else:
-                device_class, unit, state_class = (None, spn_def.unit or None, None)
+                device_class, unit, state_class = (
+                    None,
+                    spn_def.unit or None,
+                    SensorStateClass.MEASUREMENT,
+                )
             name = spn_def.name if not acronym else f"{spn_def.name} ({acronym})"
             return SensorMeta(
                 name=name,
@@ -264,16 +268,47 @@ class J1939CANProtocol:
         if ".dm1." in signal_key:
             field = signal_key.rsplit(".dm1.", 1)[1]
             dm1_meta: dict[str, SensorMeta] = {
-                "active_fault": SensorMeta(name="DM1 Active Fault", state_class=None, icon="mdi:engine"),
-                "protect_lamp": SensorMeta(name="DM1 Protect Lamp", state_class=None, icon="mdi:alert-circle"),
-                "amber_warning": SensorMeta(name="DM1 Amber Warning", state_class=None, icon="mdi:alert"),
-                "red_stop": SensorMeta(name="DM1 Red Stop", state_class=None, icon="mdi:alert-octagon"),
-                "mil": SensorMeta(name="DM1 MIL Lamp", state_class=None, icon="mdi:engine-outline"),
-                "active_spn": SensorMeta(name="DM1 Active SPN", state_class=None, icon="mdi:identifier"),
-                "active_fmi": SensorMeta(name="DM1 Active FMI", state_class=None, icon="mdi:identifier"),
-                "occurrence_count": SensorMeta(name="DM1 Occurrence Count", icon="mdi:counter"),
+                "active_fault": SensorMeta(
+                    name="DM1 Active Fault", state_class=None, icon="mdi:engine",
+                ),
+                "protect_lamp": SensorMeta(
+                    name="DM1 Protect Lamp", state_class=None, icon="mdi:alert-circle",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "amber_warning": SensorMeta(
+                    name="DM1 Amber Warning", state_class=None, icon="mdi:alert",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "red_stop": SensorMeta(
+                    name="DM1 Red Stop", state_class=None, icon="mdi:alert-octagon",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "mil": SensorMeta(
+                    name="DM1 MIL Lamp", state_class=None, icon="mdi:engine-outline",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "active_spn": SensorMeta(
+                    name="DM1 Active SPN", state_class=None, icon="mdi:identifier",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "active_fmi": SensorMeta(
+                    name="DM1 Active FMI", state_class=None, icon="mdi:identifier",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+                "occurrence_count": SensorMeta(
+                    name="DM1 Occurrence Count",
+                    state_class=SensorStateClass.MEASUREMENT,
+                    icon="mdi:counter",
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
             }
-            return dm1_meta.get(field, SensorMeta(name=f"DM1 {field}", state_class=None))
+            return dm1_meta.get(
+                field,
+                SensorMeta(
+                    name=f"DM1 {field}", state_class=None,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                ),
+            )
 
         return SensorMeta(name=signal_key, state_class=None)
 

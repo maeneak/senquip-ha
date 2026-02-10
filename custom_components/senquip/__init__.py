@@ -45,6 +45,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._available_profiles = discover_profiles(Path(__file__).parent / CAN_PROFILE_DIR)
 
         self._can_runtime: dict[str, tuple[Any, Any]] = {}
+        self._profile_errors: dict[str, list[str]] = {}
         for port in CAN_PORTS:
             config = self._port_configs.get(port)
             if config is None or not config.active or config.protocol is None:
@@ -61,11 +62,19 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if profile.base_protocol != config.protocol:
                     continue
                 selected_profiles.append(profile)
-            decoder = protocol.build_decoder(selected_profiles)
+            decoder, errors = protocol.build_decoder(selected_profiles)
+            if errors:
+                self._profile_errors[port] = errors
+                for err_msg in errors:
+                    _LOGGER.error("Port %s: %s", port, err_msg)
             self._can_runtime[port] = (protocol, decoder)
 
         self._unsubscribe: Any = None
         self.diagnostics: dict[str, Any] = {}
+
+    def get_can_runtime(self, port_id: str) -> tuple[Any, Any] | None:
+        """Return protocol/decoder tuple for a CAN port if available."""
+        return self._can_runtime.get(port_id)
 
     async def async_subscribe(self) -> None:
         """Subscribe to the device's MQTT topic."""

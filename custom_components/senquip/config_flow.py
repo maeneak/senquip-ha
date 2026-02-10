@@ -117,7 +117,7 @@ def _detect_active_ports(payload: dict[str, Any]) -> dict[str, bool]:
 def _build_decoder_for_port(
     port_config: PortConfig,
     available_profiles: dict[str, CANProfile],
-) -> tuple[Any, Any] | None:
+) -> tuple[Any, Any, list[str]] | None:
     if port_config.protocol is None:
         return None
     protocol = get_can_protocol(port_config.protocol)
@@ -131,8 +131,8 @@ def _build_decoder_for_port(
         if profile.base_protocol != port_config.protocol:
             continue
         selected_profiles.append(profile)
-    decoder = protocol.build_decoder(selected_profiles)
-    return protocol, decoder
+    decoder, errors = protocol.build_decoder(selected_profiles)
+    return protocol, decoder, errors
 
 
 def _classify_payload(
@@ -156,7 +156,9 @@ def _classify_payload(
             protocol_decoder = _build_decoder_for_port(config, available_profiles)
             if protocol_decoder is None:
                 continue
-            protocol, decoder = protocol_decoder
+            protocol, decoder, profile_errors = protocol_decoder
+            for err_msg in profile_errors:
+                _LOGGER.warning("Port %s: %s", key, err_msg)
             signals = protocol.discover_signals(value, key, decoder)
             discovered[key.upper()] = [
                 DiscoveredSignal(
@@ -173,8 +175,10 @@ def _classify_payload(
 
         if key == "events" and isinstance(value, list):
             sample_msg = ""
-            if value and isinstance(value[0], dict):
-                sample_msg = value[-1].get("msg", "")
+            if value:
+                last_event = value[-1]
+                if isinstance(last_event, dict):
+                    sample_msg = last_event.get("msg", "")
             discovered["Events"] = [
                 DiscoveredSignal(
                     key="event.main.last",
@@ -330,6 +334,20 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             SelectOptionDict(value=protocol_id, label=label)
             for protocol_id, label in list_can_protocol_options()
         ]
+
+        protocol_display = dict(list_can_protocol_options())
+        all_profile_options = [
+            SelectOptionDict(
+                value=filename,
+                label=f"{profile.name} ({protocol_display.get(profile.base_protocol, profile.base_protocol)})",
+            )
+            for filename, profile in sorted(
+                self._available_profiles.items(),
+                key=lambda item: item[1].name.lower(),
+            )
+        ]
+        all_profile_filenames = {opt["value"] for opt in all_profile_options}
+
         schema_dict: dict[Any, Any] = {}
 
         for port in active_can_ports:
@@ -343,22 +361,14 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             )
 
-            profile_options = [
-                SelectOptionDict(value=filename, label=profile.name)
-                for filename, profile in sorted(
-                    self._available_profiles.items(),
-                    key=lambda item: item[1].name.lower(),
-                )
-                if profile.base_protocol == protocol_id
-            ]
             current_profiles = [
                 profile_name
                 for profile_name in config.profiles
-                if profile_name in {option["value"] for option in profile_options}
+                if profile_name in all_profile_filenames
             ]
             schema_dict[vol.Optional(f"profiles_{port}", default=current_profiles)] = SelectSelector(
                 SelectSelectorConfig(
-                    options=profile_options,
+                    options=all_profile_options,
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )
@@ -566,6 +576,20 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
             SelectOptionDict(value=protocol_id, label=label)
             for protocol_id, label in list_can_protocol_options()
         ]
+
+        protocol_display = dict(list_can_protocol_options())
+        all_profile_options = [
+            SelectOptionDict(
+                value=filename,
+                label=f"{profile.name} ({protocol_display.get(profile.base_protocol, profile.base_protocol)})",
+            )
+            for filename, profile in sorted(
+                self._available_profiles.items(),
+                key=lambda item: item[1].name.lower(),
+            )
+        ]
+        all_profile_filenames = {opt["value"] for opt in all_profile_options}
+
         schema_dict: dict[Any, Any] = {}
         for port in active_can_ports:
             config = self._port_configs[port]
@@ -577,22 +601,14 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
-            profile_options = [
-                SelectOptionDict(value=filename, label=profile.name)
-                for filename, profile in sorted(
-                    self._available_profiles.items(),
-                    key=lambda item: item[1].name.lower(),
-                )
-                if profile.base_protocol == protocol_id
-            ]
             current_profiles = [
                 profile_name
                 for profile_name in config.profiles
-                if profile_name in {option["value"] for option in profile_options}
+                if profile_name in all_profile_filenames
             ]
             schema_dict[vol.Optional(f"profiles_{port}", default=current_profiles)] = SelectSelector(
                 SelectSelectorConfig(
-                    options=profile_options,
+                    options=all_profile_options,
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )

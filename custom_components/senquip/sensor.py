@@ -47,7 +47,11 @@ def _resolve_sensor_meta(sensor_key: str, coordinator: Any) -> SensorMeta:
         if len(parts) < 4:
             return SensorMeta(name=sensor_key, state_class=None)
         port_id = parts[1]
-        runtime = coordinator._can_runtime.get(port_id)
+        runtime = None
+        if hasattr(coordinator, "get_can_runtime"):
+            runtime = coordinator.get_can_runtime(port_id)
+        if runtime is None:
+            runtime = getattr(coordinator, "_can_runtime", {}).get(port_id)
         if runtime is None:
             return SensorMeta(name=sensor_key, state_class=None)
         protocol, decoder = runtime

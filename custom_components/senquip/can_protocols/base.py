@@ -23,8 +23,12 @@ class CANProtocol(Protocol):
     protocol_id: str
     display_name: str
 
-    def build_decoder(self, profiles: list[Any]) -> Any:
-        """Build a runtime decoder from selected profiles."""
+    def build_decoder(self, profiles: list[Any]) -> tuple[Any, list[str]]:
+        """Build a runtime decoder from selected profiles.
+
+        Returns (decoder, errors) where *errors* is a list of human-readable
+        strings describing any profiles that failed to load.
+        """
 
     def discover_signals(
         self, frames: list[dict[str, Any]], port_id: str, decoder: Any

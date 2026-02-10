@@ -24,7 +24,8 @@ def _build_decoder(with_man_profile: bool = False):
     protocol = J1939CANProtocol()
     profiles = discover_profiles(Path("custom_components/senquip/can_profiles"))
     selected = [profiles["man_d2862.json"]] if with_man_profile else []
-    return protocol, protocol.build_decoder(selected)
+    decoder, _errors = protocol.build_decoder(selected)
+    return protocol, decoder
 
 
 class TestRuntimeDecode:
