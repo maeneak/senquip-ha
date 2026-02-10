@@ -12,17 +12,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .can_profiles.loader import discover_profiles
+from .can_protocols.registry import get_can_protocol
 from .const import (
+    CAN_PORTS,
+    CAN_PROFILE_DIR,
     CONF_DEVICE_ID,
-    CONF_J1939_PROFILES,
     CONF_MQTT_TOPIC,
-    CONF_SELECTED_SENSORS,
+    CONF_PORT_CONFIGS,
+    CONF_SELECTED_SIGNALS,
     DOMAIN,
     PLATFORMS,
+    deserialize_port_configs,
 )
-from .j1939_database import PGN_DATABASE, SPN_DATABASE
-from .j1939_decoder import DM1_PGN, J1939Decoder
-from .j1939_profile_loader import merge_databases
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +33,6 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinate MQTT data for a single Senquip device."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
@@ -39,27 +40,29 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._entry = entry
         self._device_id: str = entry.data[CONF_DEVICE_ID]
-        self._selected: set[str] = set(entry.data[CONF_SELECTED_SENSORS])
+        self._selected: set[str] = set(entry.data[CONF_SELECTED_SIGNALS])
+        self._port_configs = deserialize_port_configs(entry.data.get(CONF_PORT_CONFIGS))
+        self._available_profiles = discover_profiles(Path(__file__).parent / CAN_PROFILE_DIR)
 
-        # Load J1939 profiles per port and create per-port decoders
-        profiles_config = entry.data.get(CONF_J1939_PROFILES, {})
-
-        # Ensure dict format (default to empty dict)
-        if not isinstance(profiles_config, dict):
-            profiles_config = {}
-
-        # Build decoders per port
-        self._decoders: dict[str, J1939Decoder] = {}
-        custom_dir = Path(__file__).parent / "j1939_custom"
-
-        for port in ("can1", "can2"):
-            profile_names = profiles_config.get(port, [])
-            profile_paths = [custom_dir / name for name in profile_names]
-
-            pgn_db, spn_db, dm1_config = merge_databases(
-                PGN_DATABASE, SPN_DATABASE, profile_paths
-            )
-            self._decoders[port] = J1939Decoder(pgn_db, spn_db, dm1_config)
+        self._can_runtime: dict[str, tuple[Any, Any]] = {}
+        for port in CAN_PORTS:
+            config = self._port_configs.get(port)
+            if config is None or not config.active or config.protocol is None:
+                continue
+            protocol = get_can_protocol(config.protocol)
+            if protocol is None:
+                _LOGGER.warning("Unsupported protocol %s on %s", config.protocol, port)
+                continue
+            selected_profiles = []
+            for profile_name in config.profiles:
+                profile = self._available_profiles.get(profile_name)
+                if profile is None:
+                    continue
+                if profile.base_protocol != config.protocol:
+                    continue
+                selected_profiles.append(profile)
+            decoder = protocol.build_decoder(selected_profiles)
+            self._can_runtime[port] = (protocol, decoder)
 
         self._unsubscribe: Any = None
         self.diagnostics: dict[str, Any] = {}
@@ -97,7 +100,6 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning("Invalid JSON on topic %s", msg.topic)
             return
 
-        # Handle array payloads (shouldn't happen per config, but be safe)
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict) and item.get("deviceid") == self._device_id:
@@ -113,139 +115,44 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.async_set_updated_data(data)
 
     def _parse_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Parse raw JSON into a flat {sensor_key: value} dict."""
+        """Parse raw JSON into a flat {signal_key: value} dict."""
         data: dict[str, Any] = {}
         diag: dict[str, Any] = {}
 
         for key, value in payload.items():
-            # Skip metadata fields
             if key in ("deviceid", "ts", "time"):
                 continue
 
-            # CAN ports — decode J1939 frames
-            if key in ("can1", "can2") and isinstance(value, list):
-                # Get port-specific decoder
-                decoder = self._decoders.get(key)
-                if decoder is None:
-                    _LOGGER.warning("No decoder configured for port %s", key)
+            if key in CAN_PORTS and isinstance(value, list):
+                runtime = self._can_runtime.get(key)
+                if runtime is None:
                     continue
-
-                port_diag: list[dict[str, Any]] = []
-
-                for frame in value:
-                    can_id = frame.get("id")
-                    hex_data = frame.get("data")
-                    if can_id is None or hex_data is None:
-                        continue
-
-                    _, pgn, source = decoder.extract_pgn(can_id)
-                    pgn_def = decoder.get_pgn_info(can_id)
-
-                    frame_diag: dict[str, Any] = {
-                        "can_id": can_id,
-                        "can_id_hex": f"0x{can_id:08X}",
-                        "pgn": pgn,
-                        "pgn_hex": f"0x{pgn:04X}",
-                        "source_address": source,
-                        "data": hex_data,
-                        "known": pgn_def is not None or pgn == DM1_PGN,
-                    }
-
-                    # DM1 (Diagnostic Trouble Codes) — special handling
-                    if pgn == DM1_PGN:
-                        try:
-                            dm1_bytes = bytes.fromhex(hex_data)
-                        except ValueError:
-                            port_diag.append(frame_diag)
-                            continue
-
-                        big_endian = decoder.is_dm1_big_endian(key)
-                        dm1 = decoder.decode_dm1(
-                            dm1_bytes, big_endian_spn=big_endian
-                        )
-                        if dm1 is not None:
-                            custom_faults = (
-                                decoder.get_dm1_custom_fault_spns()
-                            )
-                            fault_desc = decoder.get_fault_description(
-                                dm1.active_spn, dm1.active_fmi, custom_faults
-                            )
-
-                            dm1_sensors = {
-                                f"{key}.dm1.protect_lamp": "Active" if dm1.lamp_protect else "Off",
-                                f"{key}.dm1.amber_warning": "Active" if dm1.lamp_amber else "Off",
-                                f"{key}.dm1.red_stop": "Active" if dm1.lamp_red else "Off",
-                                f"{key}.dm1.mil": "Active" if dm1.lamp_mil else "Off",
-                                f"{key}.dm1.active_spn": dm1.active_spn,
-                                f"{key}.dm1.active_fmi": dm1.active_fmi,
-                                f"{key}.dm1.active_fault": fault_desc,
-                                f"{key}.dm1.occurrence_count": dm1.occurrence_count,
-                            }
-                            for sk, sv in dm1_sensors.items():
-                                if sk in self._selected:
-                                    data[sk] = sv
-
-                            frame_diag["pgn_name"] = "DM1 - Active DTCs"
-                            frame_diag["pgn_acronym"] = "DM1"
-                            frame_diag["dm1"] = {
-                                "lamp_protect": dm1.lamp_protect,
-                                "lamp_amber": dm1.lamp_amber,
-                                "lamp_red": dm1.lamp_red,
-                                "lamp_mil": dm1.lamp_mil,
-                                "active_spn": dm1.active_spn,
-                                "active_fmi": dm1.active_fmi,
-                                "active_fault": fault_desc,
-                                "occurrence_count": dm1.occurrence_count,
-                                "encoding": "big_endian" if big_endian else "little_endian",
-                            }
-
-                        port_diag.append(frame_diag)
-                        continue
-
-                    decoded = decoder.decode_frame(can_id, hex_data)
-
-                    if pgn_def:
-                        frame_diag["pgn_name"] = pgn_def.name
-                        frame_diag["pgn_acronym"] = pgn_def.acronym
-                        spns: dict[str, Any] = {}
-                        for spn_num, spn_value in decoded.items():
-                            spn_def = decoder.get_spn_def(spn_num)
-                            spn_entry: dict[str, Any] = {"value": spn_value}
-                            if spn_def:
-                                spn_entry["name"] = spn_def.name
-                                spn_entry["unit"] = spn_def.unit
-                            spns[str(spn_num)] = spn_entry
-                        frame_diag["spns"] = spns
-
-                    port_diag.append(frame_diag)
-
-                    # Normal sensor data extraction
-                    for spn_num, spn_value in decoded.items():
-                        sensor_key = f"{key}.spn{spn_num}"
-                        if sensor_key in self._selected:
-                            data[sensor_key] = spn_value
-
-                    # Raw unknown PGNs
-                    if not decoded:
-                        raw_key = f"{key}.raw.{pgn}"
-                        if raw_key in self._selected:
-                            data[raw_key] = hex_data
-
+                protocol, decoder = runtime
+                port_values, port_diag = protocol.decode_runtime(
+                    value,
+                    key,
+                    self._selected,
+                    decoder,
+                )
+                data.update(port_values)
                 if port_diag:
-                    diag[key] = port_diag
+                    diag[key] = {
+                        "protocol": protocol.protocol_id,
+                        "frames": port_diag,
+                    }
+                continue
 
-            # Events — store last event message
-            elif key == "events" and isinstance(value, list):
-                if "events.last" in self._selected and value:
+            if key == "events" and isinstance(value, list):
+                if "event.main.last" in self._selected and value:
                     last_event = value[-1]
                     if isinstance(last_event, dict):
-                        data["events.last"] = last_event.get("msg", "")
+                        data["event.main.last"] = last_event.get("msg", "")
+                continue
 
-            # Internal/flat sensors
-            elif isinstance(value, (int, float, str)):
-                sensor_key = f"internal.{key}"
-                if sensor_key in self._selected:
-                    data[sensor_key] = value
+            if isinstance(value, (int, float, str)):
+                signal_key = f"internal.main.{key}"
+                if signal_key in self._selected:
+                    data[signal_key] = value
 
         self.diagnostics = diag
         return data
@@ -257,7 +164,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_subscribe()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -272,3 +178,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+

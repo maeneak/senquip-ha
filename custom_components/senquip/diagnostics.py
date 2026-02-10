@@ -10,9 +10,9 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
-    CONF_J1939_PROFILES,
     CONF_MQTT_TOPIC,
-    CONF_SELECTED_SENSORS,
+    CONF_PORT_CONFIGS,
+    CONF_SELECTED_SIGNALS,
     DOMAIN,
 )
 
@@ -22,29 +22,30 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-
     can_diag = coordinator.diagnostics
     can_summary: dict[str, Any] = {}
 
-    for port, frames in can_diag.items():
-        known_frames = [f for f in frames if f.get("known")]
-        unknown_frames = [f for f in frames if not f.get("known")]
+    for port, port_data in can_diag.items():
+        protocol = port_data.get("protocol")
+        frames = port_data.get("frames", [])
+        known_frames = [frame for frame in frames if frame.get("known")]
+        unknown_frames = [frame for frame in frames if not frame.get("known")]
 
-        # SPNs with None (not available / error) values
         null_spns: list[dict[str, Any]] = []
-        for f in known_frames:
-            for spn_id, spn_info in f.get("spns", {}).items():
+        for frame in known_frames:
+            for spn_id, spn_info in frame.get("spns", {}).items():
                 if spn_info.get("value") is None:
                     null_spns.append(
                         {
                             "spn": spn_id,
                             "name": spn_info.get("name", "Unknown"),
-                            "pgn": f.get("pgn"),
-                            "pgn_acronym": f.get("pgn_acronym", ""),
+                            "pgn": frame.get("pgn"),
+                            "pgn_acronym": frame.get("pgn_acronym", ""),
                         }
                     )
 
         can_summary[port] = {
+            "protocol": protocol,
             "total_frames": len(frames),
             "known_frames": len(known_frames),
             "unknown_frames": len(unknown_frames),
@@ -57,9 +58,10 @@ async def async_get_config_entry_diagnostics(
             "device_id": entry.data.get(CONF_DEVICE_ID),
             "device_name": entry.data.get(CONF_DEVICE_NAME),
             "mqtt_topic": entry.data.get(CONF_MQTT_TOPIC),
-            "selected_sensors": entry.data.get(CONF_SELECTED_SENSORS, []),
-            "j1939_profiles": entry.data.get(CONF_J1939_PROFILES, []),
+            "selected_signals": entry.data.get(CONF_SELECTED_SIGNALS, []),
+            "port_configs": entry.data.get(CONF_PORT_CONFIGS, {}),
         },
         "current_values": coordinator.data or {},
         "can_bus": can_summary,
     }
+

@@ -1,16 +1,12 @@
-"""J1939 CAN bus decoder.
-
-Extracts PGNs from 29-bit CAN IDs and decodes SPNs from raw data payloads
-using the definitions in j1939_database.py.
-"""
+"""J1939 CAN bus decoder."""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from .j1939_database import PGN_DATABASE, SPN_DATABASE, PGNDefinition, SPNDefinition
-from .j1939_profile_loader import DM1Config
+from .database import PGN_DATABASE, SPN_DATABASE, PGNDefinition, SPNDefinition
+from .overlay import DM1Config
 
 _LOGGER = logging.getLogger(__name__)
 
