@@ -1,0 +1,201 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Start All Containers",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "up", "-d"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Stop All Containers",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "down"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Restart Home Assistant",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "restart", "homeassistant"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: View HA Logs",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "logs", "-f", "homeassistant"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: View Publisher Logs",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "logs", "-f", "publisher"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: View All Logs",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "logs", "-f"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Reset HA Config (Down + Delete Volumes)",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "down", "-v"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Open Home Assistant",
+      "type": "shell",
+      "command": "start",
+      "args": ["http://localhost:8123"],
+      "windows": {
+        "command": "cmd",
+        "args": ["/c", "start", "http://localhost:8123"]
+      },
+      "linux": {
+        "command": "xdg-open",
+        "args": ["http://localhost:8123"]
+      },
+      "osx": {
+        "command": "open",
+        "args": ["http://localhost:8123"]
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Rebuild Publisher Container",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "build", "publisher"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Stop and Rebuild All",
+      "type": "shell",
+      "command": "docker",
+      "args": ["compose", "up", "-d", "--build"],
+      "options": {
+        "cwd": "${workspaceFolder}/dev-tools"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: Run All Tests",
+      "type": "shell",
+      "command": "pytest",
+      "args": ["tests/"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: Run Single Test File",
+      "type": "shell",
+      "command": "pytest",
+      "args": ["${file}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

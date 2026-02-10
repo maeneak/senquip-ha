@@ -1,0 +1,43 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: senquip-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: senquip-ha
+    depends_on:
+      - mosquitto
+    ports:
+      - "8123:8123"
+    volumes:
+      - ha_config:/config
+      # Mount the integration from the working tree
+      - ../custom_components/senquip:/config/custom_components/senquip:ro
+    environment:
+      - TZ=Pacific/Auckland
+    restart: unless-stopped
+
+  publisher:
+    build:
+      context: ./mqtt-publisher
+    container_name: senquip-publisher
+    depends_on:
+      - mosquitto
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      # Default: two devices on separate topics (realistic simulation)
+      # Format: topic:scenario_file:interval_seconds (comma-separated for multiple)
+      - PUBLISH_STREAMS=senquip/HE8EV12LF/data:scenarios/device_he8ev12lf.json:5,senquip/HD2EKH27F/data:scenarios/device_hd2ekh27f.json:5
+    volumes:
+      - ./mqtt-publisher/scenarios:/app/scenarios
+    restart: unless-stopped
+
+volumes:
+  ha_config:

@@ -1,0 +1,23 @@
+{
+    "deviceid": "FAULT001",
+    "vsys": 4.17,
+    "vin": 28.09,
+    "can1": [
+        {"id": 217056256, "data": "0E7D7DE32E000F7D"},
+        {"id": 419357952, "data": "F53700004FEF0000"},
+        {"id": 419351040, "data": "44FF6E000001FFFF", "_comment": "DM1 PGN 65226 — SPN 110 (Engine Coolant Temp) FMI 0 (Above Normal), LE encoding"}
+    ],
+    "can2": [
+        {"id": 217056256, "data": "4FFFD1C83927F4FF"},
+        {"id": 419357952, "data": "AB27000000000000"},
+        {"id": 419351040, "data": "44FFFE00C201FFFF", "_comment": "DM1 PGN 65226 — SPN 520198 (Emergency Stop) FMI 2 (Data Erratic), BE encoding"}
+    ],
+    "ambient": 45.0,
+    "light": 0,
+    "state": 0,
+    "accel_x": 1.0,
+    "wifi_ip": "192.168.1.102",
+    "wifi_rssi": -30,
+    "ts": 1770605573.0,
+    "time": 1770605573
+}

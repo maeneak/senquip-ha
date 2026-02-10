@@ -1,0 +1,19 @@
+{
+    "deviceid": "EVENT001",
+    "vsys": 4.17,
+    "vin": 28.27,
+    "ambient": 42.0,
+    "light": 0,
+    "state": 0,
+    "accel_x": 1.06,
+    "accel_y": -0.01,
+    "accel_z": -0.07,
+    "wifi_ip": "192.168.1.101",
+    "wifi_rssi": -25,
+    "ts": 1770605573.0,
+    "time": 1770605573,
+    "events": [
+        {"topic": "mjs", "msg": "CPU Threshold Exceeded", "lv": 30},
+        {"topic": "alert", "msg": "High Temperature Warning", "lv": 20}
+    ]
+}

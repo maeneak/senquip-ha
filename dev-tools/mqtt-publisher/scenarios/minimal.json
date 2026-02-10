@@ -1,0 +1,15 @@
+{
+    "deviceid": "MIN001",
+    "vsys": 4.05,
+    "vin": 27.8,
+    "ambient": 25.0,
+    "light": 0,
+    "state": 0,
+    "accel_x": 1.0,
+    "accel_y": 0.0,
+    "accel_z": 0.0,
+    "wifi_ip": "192.168.1.100",
+    "wifi_rssi": -40,
+    "ts": 1770605573.0,
+    "time": 1770605573
+}
