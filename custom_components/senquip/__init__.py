@@ -41,15 +41,25 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_id: str = entry.data[CONF_DEVICE_ID]
         self._selected: set[str] = set(entry.data[CONF_SELECTED_SENSORS])
 
-        # Load J1939 profiles and merge with built-in database
-        profile_names = entry.data.get(CONF_J1939_PROFILES, [])
-        custom_dir = Path(__file__).parent / "j1939_custom"
-        profile_paths = [custom_dir / name for name in profile_names]
+        # Load J1939 profiles per port and create per-port decoders
+        profiles_config = entry.data.get(CONF_J1939_PROFILES, {})
 
-        self._pgn_db, self._spn_db, self._dm1_config = merge_databases(
-            PGN_DATABASE, SPN_DATABASE, profile_paths
-        )
-        self._decoder = J1939Decoder(self._pgn_db, self._spn_db, self._dm1_config)
+        # Ensure dict format (default to empty dict)
+        if not isinstance(profiles_config, dict):
+            profiles_config = {}
+
+        # Build decoders per port
+        self._decoders: dict[str, J1939Decoder] = {}
+        custom_dir = Path(__file__).parent / "j1939_custom"
+
+        for port in ("can1", "can2"):
+            profile_names = profiles_config.get(port, [])
+            profile_paths = [custom_dir / name for name in profile_names]
+
+            pgn_db, spn_db, dm1_config = merge_databases(
+                PGN_DATABASE, SPN_DATABASE, profile_paths
+            )
+            self._decoders[port] = J1939Decoder(pgn_db, spn_db, dm1_config)
 
         self._unsubscribe: Any = None
         self.diagnostics: dict[str, Any] = {}
@@ -114,6 +124,12 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # CAN ports — decode J1939 frames
             if key in ("can1", "can2") and isinstance(value, list):
+                # Get port-specific decoder
+                decoder = self._decoders.get(key)
+                if decoder is None:
+                    _LOGGER.warning("No decoder configured for port %s", key)
+                    continue
+
                 port_diag: list[dict[str, Any]] = []
 
                 for frame in value:
@@ -122,8 +138,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if can_id is None or hex_data is None:
                         continue
 
-                    _, pgn, source = self._decoder.extract_pgn(can_id)
-                    pgn_def = self._decoder.get_pgn_info(can_id)
+                    _, pgn, source = decoder.extract_pgn(can_id)
+                    pgn_def = decoder.get_pgn_info(can_id)
 
                     frame_diag: dict[str, Any] = {
                         "can_id": can_id,
@@ -143,15 +159,15 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             port_diag.append(frame_diag)
                             continue
 
-                        big_endian = self._decoder.is_dm1_big_endian(key)
-                        dm1 = self._decoder.decode_dm1(
+                        big_endian = decoder.is_dm1_big_endian(key)
+                        dm1 = decoder.decode_dm1(
                             dm1_bytes, big_endian_spn=big_endian
                         )
                         if dm1 is not None:
                             custom_faults = (
-                                self._decoder.get_dm1_custom_fault_spns()
+                                decoder.get_dm1_custom_fault_spns()
                             )
-                            fault_desc = self._decoder.get_fault_description(
+                            fault_desc = decoder.get_fault_description(
                                 dm1.active_spn, dm1.active_fmi, custom_faults
                             )
 
@@ -186,14 +202,14 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         port_diag.append(frame_diag)
                         continue
 
-                    decoded = self._decoder.decode_frame(can_id, hex_data)
+                    decoded = decoder.decode_frame(can_id, hex_data)
 
                     if pgn_def:
                         frame_diag["pgn_name"] = pgn_def.name
                         frame_diag["pgn_acronym"] = pgn_def.acronym
                         spns: dict[str, Any] = {}
                         for spn_num, spn_value in decoded.items():
-                            spn_def = self._decoder.get_spn_def(spn_num)
+                            spn_def = decoder.get_spn_def(spn_num)
                             spn_entry: dict[str, Any] = {"value": spn_value}
                             if spn_def:
                                 spn_entry["name"] = spn_def.name

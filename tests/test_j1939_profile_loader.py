@@ -73,9 +73,10 @@ class TestLoadProfile:
         profile_path = tmp_path / "valid.json"
         _write_json(profile_path, profile)
 
-        pgn_db, spn_db = load_profile(profile_path)
+        pgn_db, spn_db, dm1_config = load_profile(profile_path)
         assert pgn_db[100].acronym == "TPGN"
         assert spn_db[1].unit == "V"
+        assert dm1_config is None  # No DM1 config in this profile
 
     def test_missing_required_field(self, tmp_path: Path):
         profile = {
@@ -186,13 +187,14 @@ class TestMergeDatabases:
         profile_path = tmp_path / "override.json"
         _write_json(profile_path, profile)
 
-        merged_pgn, merged_spn = merge_databases(
+        merged_pgn, merged_spn, dm1_config = merge_databases(
             base_pgn, base_spn, [profile_path]
         )
         assert merged_pgn[100].spns == (3,)
         assert merged_pgn[200].spns == (2,)
         assert 1 in merged_spn
         assert 3 in merged_spn
+        assert dm1_config is None  # No DM1 config in test profile
 
     def test_man_profile_override(self):
         repo_root = Path(__file__).resolve().parents[1]
@@ -204,10 +206,14 @@ class TestMergeDatabases:
             / "man_d2862.json"
         )
 
-        pgn_db, _ = load_profile(profile_path)
+        pgn_db, _, dm1_config = load_profile(profile_path)
         assert pgn_db[65271].spns == (167, 168)
+        assert dm1_config is not None  # MAN profile has DM1 config
+        assert dm1_config.spn_encoding == "big_endian"
 
-        merged_pgn, _ = merge_databases(
+        merged_pgn, _, merged_dm1 = merge_databases(
             PGN_DATABASE, SPN_DATABASE, [profile_path]
         )
         assert merged_pgn[65271].spns == (167, 168)
+        assert merged_dm1 is not None
+        assert merged_dm1.spn_encoding == "big_endian"

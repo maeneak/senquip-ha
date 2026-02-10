@@ -78,7 +78,8 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_payload: dict[str, Any] | None = None
         self._discovered_sensors: dict[str, list[DiscoveredSensor]] = {}
         self._available_profiles: dict[str, str] = {}
-        self._selected_profiles: list[str] = []
+        self._selected_profiles: dict[str, list[str]] = {}  # Per-port profiles
+        self._active_ports: set[str] = set()  # Track which CAN ports have frames
         self._discovery_task: asyncio.Task | None = None
 
     async def async_step_user(
@@ -143,47 +144,58 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_select_profiles(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 3: Select optional J1939 profile overrides."""
+        """Step 3: Select optional J1939 profile overrides per CAN port."""
         if user_input is not None:
-            self._selected_profiles = user_input.get(CONF_J1939_PROFILES, [])
+            # Store per-port profile selections
+            self._selected_profiles = {}
+            for port in self._active_ports:
+                key = f"profiles_{port}"
+                self._selected_profiles[port] = user_input.get(key, [])
+
+            # Rebuild sensors with per-port profiles
             if self._device_payload is not None:
-                decoder = _build_profile_decoder(self._selected_profiles)
-                self._discovered_sensors = _classify_payload(
-                    self._device_payload, decoder=decoder
+                self._discovered_sensors, _ = _classify_payload_with_profiles(
+                    self._device_payload,
+                    self._selected_profiles,
                 )
             return await self.async_step_select_sensors()
 
         custom_dir = Path(__file__).parent / "j1939_custom"
         self._available_profiles = discover_profiles(custom_dir)
+
         if not self._available_profiles:
-            self._selected_profiles = []
+            # No profiles available, skip to sensor selection
+            self._selected_profiles = {port: [] for port in self._active_ports}
             if self._device_payload is not None and not self._discovered_sensors:
-                self._discovered_sensors = _classify_payload(self._device_payload)
+                self._discovered_sensors, _ = _classify_payload_with_profiles(
+                    self._device_payload,
+                    self._selected_profiles,
+                )
             return await self.async_step_select_sensors()
 
+        # Build schema with one multi-select per active port
         options = [
             SelectOptionDict(value=filename, label=display_name)
             for filename, display_name in sorted(
                 self._available_profiles.items(), key=lambda item: item[1].lower()
             )
         ]
-        defaults = [
-            name for name in self._selected_profiles if name in self._available_profiles
-        ]
 
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_J1939_PROFILES, default=defaults): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                    )
+        schema_dict = {}
+        for port in sorted(self._active_ports):
+            port_label = port.upper().replace("CAN", "CAN ")
+            schema_dict[vol.Optional(f"profiles_{port}", default=[])] = SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
                 )
-            }
-        )
+            )
 
-        return self.async_show_form(step_id="select_profiles", data_schema=schema)
+        return self.async_show_form(
+            step_id="select_profiles",
+            data_schema=vol.Schema(schema_dict),
+        )
 
     async def async_step_select_sensors(
         self, user_input: dict[str, Any] | None = None
@@ -291,9 +303,9 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(self._device_id)
         self._abort_if_unique_id_configured()
 
-        # Classify all fields
+        # Classify all fields and track active ports
         self._device_payload = device_payload
-        self._discovered_sensors = _classify_payload(device_payload)
+        self._discovered_sensors, self._active_ports = _classify_payload(device_payload)
 
 
 def _build_profile_decoder(profile_names: list[str]) -> J1939Decoder:
@@ -309,12 +321,193 @@ def _build_profile_decoder(profile_names: list[str]) -> J1939Decoder:
     return J1939Decoder(pgn_db, spn_db, dm1_config)
 
 
+def _classify_payload_with_profiles(
+    payload: dict[str, Any],
+    profiles_per_port: dict[str, list[str]],
+) -> tuple[dict[str, list[DiscoveredSensor]], set[str]]:
+    """Classify payload with per-port profile support.
+
+    Args:
+        payload: The MQTT payload to classify
+        profiles_per_port: Dict mapping port names to list of profile filenames
+
+    Returns:
+        Tuple of (discovered sensors dict, active ports set)
+    """
+    discovered: dict[str, list[DiscoveredSensor]] = {}
+    active_ports: set[str] = set()
+
+    # Build per-port decoders
+    port_decoders: dict[str, J1939Decoder] = {}
+    for port, profile_names in profiles_per_port.items():
+        port_decoders[port] = _build_profile_decoder(profile_names)
+
+    # Process each CAN port with its own decoder
+    for key, value in payload.items():
+        # Skip metadata
+        if key in ("deviceid", "ts", "time"):
+            continue
+
+        # CAN ports
+        if key in ("can1", "can2") and isinstance(value, list):
+            active_ports.add(key)
+            decoder = port_decoders.get(key, J1939Decoder())
+            category = key.upper()
+            sensors: list[DiscoveredSensor] = []
+            seen_spns: set[int] = set()
+
+            # Iterate frames and decode with port-specific decoder
+            for frame in value:
+                can_id = frame.get("id")
+                hex_data = frame.get("data")
+                if can_id is None or hex_data is None:
+                    continue
+
+                _, pgn, _ = decoder.extract_pgn(can_id)
+                pgn_def = decoder.get_pgn_info(can_id)
+
+                # Skip DM1 frames (will be added separately below)
+                if pgn == DM1_PGN:
+                    continue
+
+                # Decode normal frames using port-specific decoder
+                decoded = decoder.decode_frame(can_id, hex_data)
+
+                if decoded:
+                    for spn_num, spn_value in decoded.items():
+                        if spn_num in seen_spns:
+                            continue
+                        seen_spns.add(spn_num)
+                        spn_def = decoder._spn_db.get(spn_num)
+                        acronym = pgn_def.acronym if pgn_def else ""
+                        sensors.append(
+                            DiscoveredSensor(
+                                key=f"{key}.spn{spn_num}",
+                                name=f"{spn_def.name} — {acronym}" if spn_def else f"SPN {spn_num}",
+                                sample_value=spn_value,
+                                unit=spn_def.unit if spn_def else None,
+                                default_selected=spn_value is not None,
+                            )
+                        )
+                else:
+                    # Unknown PGN
+                    sensors.append(
+                        DiscoveredSensor(
+                            key=f"{key}.raw.{pgn}",
+                            name=f"Unknown PGN {pgn} (0x{pgn:04X})",
+                            sample_value=hex_data[:16] + ("..." if len(hex_data) > 16 else ""),
+                            unit=None,
+                            default_selected=False,
+                        )
+                    )
+
+            # Always add DM1 sensors (Option 3)
+            dm1_sensors = [
+                DiscoveredSensor(
+                    key=f"{key}.dm1.active_fault",
+                    name="DM1 Active Fault",
+                    sample_value="No Active Fault",
+                    unit=None,
+                    default_selected=True,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.protect_lamp",
+                    name="DM1 Protect Lamp",
+                    sample_value="Off",
+                    unit=None,
+                    default_selected=True,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.amber_warning",
+                    name="DM1 Amber Warning",
+                    sample_value="Off",
+                    unit=None,
+                    default_selected=True,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.red_stop",
+                    name="DM1 Red Stop",
+                    sample_value="Off",
+                    unit=None,
+                    default_selected=True,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.mil",
+                    name="DM1 MIL Lamp",
+                    sample_value="Off",
+                    unit=None,
+                    default_selected=False,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.active_spn",
+                    name="DM1 Active SPN",
+                    sample_value=0,
+                    unit=None,
+                    default_selected=False,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.active_fmi",
+                    name="DM1 Active FMI",
+                    sample_value=0,
+                    unit=None,
+                    default_selected=False,
+                ),
+                DiscoveredSensor(
+                    key=f"{key}.dm1.occurrence_count",
+                    name="DM1 Occurrence Count",
+                    sample_value=0,
+                    unit=None,
+                    default_selected=False,
+                ),
+            ]
+            sensors.extend(dm1_sensors)
+
+            discovered[category] = sensors
+
+        # Events
+        elif key == "events" and isinstance(value, list):
+            sample_msg = ""
+            if value and isinstance(value[0], dict):
+                sample_msg = value[0].get("msg", "")
+            discovered["Events"] = [
+                DiscoveredSensor(
+                    key="events.last",
+                    name="Last Event",
+                    sample_value=sample_msg,
+                    unit=None,
+                    default_selected=True,
+                )
+            ]
+
+        # Internal sensors
+        elif isinstance(value, (int, float, str)):
+            meta = KNOWN_INTERNAL_SENSORS.get(key)
+            name = meta.name if meta else key.replace("_", " ").title()
+            unit = meta.unit if meta else None
+            discovered.setdefault("Internal", []).append(
+                DiscoveredSensor(
+                    key=f"internal.{key}",
+                    name=name,
+                    sample_value=value,
+                    unit=unit,
+                    default_selected=True,
+                )
+            )
+
+    return discovered, active_ports
+
+
 def _classify_payload(
     payload: dict[str, Any],
     decoder: J1939Decoder | None = None,
-) -> dict[str, list[DiscoveredSensor]]:
-    """Classify all payload fields into sensor categories."""
+) -> tuple[dict[str, list[DiscoveredSensor]], set[str]]:
+    """Classify all payload fields into sensor categories.
+
+    Returns:
+        Tuple of (discovered sensors dict, active ports set)
+    """
     result: dict[str, list[DiscoveredSensor]] = {}
+    active_ports: set[str] = set()
     if decoder is None:
         decoder = J1939Decoder()
 
@@ -325,6 +518,7 @@ def _classify_payload(
 
         # CAN ports
         if key in ("can1", "can2") and isinstance(value, list):
+            active_ports.add(key)  # Track this port as active
             category = key.upper()
             sensors: list[DiscoveredSensor] = []
             seen_spns: set[int] = set()
@@ -379,9 +573,9 @@ def _classify_payload(
                         )
                     )
 
-            # Add DM1 sensors if a DM1 frame was found on this port
-            if has_dm1:
-                dm1_sensors = [
+            # Always add DM1 sensors for fault monitoring (Option 3)
+            # DM1 frames may not be broadcast during discovery but will appear during faults
+            dm1_sensors = [
                     DiscoveredSensor(
                         key=f"{key}.dm1.active_fault",
                         name="DM1 Active Fault",
@@ -439,7 +633,7 @@ def _classify_payload(
                         default_selected=False,
                     ),
                 ]
-                sensors.extend(dm1_sensors)
+            sensors.extend(dm1_sensors)
 
             if sensors:
                 result[category] = sensors
@@ -474,7 +668,7 @@ def _classify_payload(
                 )
             )
 
-    return result
+    return result, active_ports
 
 
 class SenquipOptionsFlow(config_entries.OptionsFlow):
@@ -486,9 +680,10 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
         self._device_payload: dict[str, Any] | None = None
         self._discovered_sensors: dict[str, list[DiscoveredSensor]] = {}
         self._available_profiles: dict[str, str] = {}
-        self._selected_profiles: list[str] = list(
-            config_entry.data.get(CONF_J1939_PROFILES, [])
-        )
+        # Load existing per-port profiles (dict format)
+        profiles_config = config_entry.data.get(CONF_J1939_PROFILES, {})
+        self._selected_profiles: dict[str, list[str]] = profiles_config if isinstance(profiles_config, dict) else {}
+        self._active_ports: set[str] = set()
         self._discovery_task: asyncio.Task | None = None
 
     async def async_step_init(
@@ -537,47 +732,59 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
     async def async_step_select_profiles(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Select J1939 profile overrides for options flow."""
+        """Select J1939 profile overrides per CAN port for options flow."""
         if user_input is not None:
-            self._selected_profiles = user_input.get(CONF_J1939_PROFILES, [])
+            # Store per-port profile selections
+            self._selected_profiles = {}
+            for port in self._active_ports:
+                key = f"profiles_{port}"
+                self._selected_profiles[port] = user_input.get(key, [])
+
+            # Rebuild sensors with per-port profiles
             if self._device_payload is not None:
-                decoder = _build_profile_decoder(self._selected_profiles)
-                self._discovered_sensors = _classify_payload(
-                    self._device_payload, decoder=decoder
+                self._discovered_sensors, _ = _classify_payload_with_profiles(
+                    self._device_payload,
+                    self._selected_profiles,
                 )
             return await self.async_step_select_sensors()
 
         custom_dir = Path(__file__).parent / "j1939_custom"
         self._available_profiles = discover_profiles(custom_dir)
+
         if not self._available_profiles:
-            self._selected_profiles = []
+            # No profiles available, skip to sensor selection
+            self._selected_profiles = {port: [] for port in self._active_ports}
             if self._device_payload is not None and not self._discovered_sensors:
-                self._discovered_sensors = _classify_payload(self._device_payload)
+                self._discovered_sensors, _ = _classify_payload_with_profiles(
+                    self._device_payload,
+                    self._selected_profiles,
+                )
             return await self.async_step_select_sensors()
 
+        # Build schema with one multi-select per active port
         options = [
             SelectOptionDict(value=filename, label=display_name)
             for filename, display_name in sorted(
                 self._available_profiles.items(), key=lambda item: item[1].lower()
             )
         ]
-        defaults = [
-            name for name in self._selected_profiles if name in self._available_profiles
-        ]
 
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_J1939_PROFILES, default=defaults): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                    )
+        schema_dict = {}
+        for port in sorted(self._active_ports):
+            port_label = port.upper().replace("CAN", "CAN ")
+            current_profiles = self._selected_profiles.get(port, [])
+            schema_dict[vol.Optional(f"profiles_{port}", default=current_profiles)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
                 )
-            }
-        )
+            )
 
-        return self.async_show_form(step_id="select_profiles", data_schema=schema)
+        return self.async_show_form(
+            step_id="select_profiles",
+            data_schema=vol.Schema(schema_dict),
+        )
 
     async def async_step_select_sensors(
         self, user_input: dict[str, Any] | None = None
@@ -685,4 +892,4 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
 
         # Re-use the classify logic from the main config flow
         self._device_payload = device_payload
-        self._discovered_sensors = _classify_payload(device_payload)
+        self._discovered_sensors, self._active_ports = _classify_payload(device_payload)

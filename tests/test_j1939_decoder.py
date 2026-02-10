@@ -245,9 +245,10 @@ class TestHelpers:
             {"id": 419357952, "data": "5F27000000000000"},
             {"id": 419372032, "data": "C4F0FFFF00FF00FF"},  # unknown
         ]
-        results = decoder.decode_can_port(frames)
+        results, dm1_result = decoder.decode_can_port(frames)
         assert results[190] == 1841.0
         assert results[247] == 503.95
+        assert dm1_result is None  # No DM1 frames in test data
 
     def test_decode_can_port_skips_missing_fields(self, decoder):
         """Frames missing id or data are skipped."""
@@ -256,8 +257,9 @@ class TestHelpers:
             {"data": "AABB"},
             {},
         ]
-        results = decoder.decode_can_port(frames)
+        results, dm1_result = decoder.decode_can_port(frames)
         assert results == {}
+        assert dm1_result is None
 
 
 # ---------------------------------------------------------------------------

@@ -197,10 +197,24 @@ async def async_setup_entry(
 
     entities: list[SenquipSensorEntity] = []
     for sensor_key in selected:
+        # Determine which port's decoder to use for metadata resolution
+        pgn_db = None
+        spn_db = None
+        if sensor_key.startswith("can1."):
+            decoder = coordinator._decoders.get("can1")
+            if decoder:
+                pgn_db = decoder._pgn_db
+                spn_db = decoder._spn_db
+        elif sensor_key.startswith("can2."):
+            decoder = coordinator._decoders.get("can2")
+            if decoder:
+                pgn_db = decoder._pgn_db
+                spn_db = decoder._spn_db
+
         meta = _resolve_sensor_meta(
             sensor_key,
-            pgn_database=coordinator._pgn_db,
-            spn_database=coordinator._spn_db,
+            pgn_database=pgn_db,
+            spn_database=spn_db,
         )
         entities.append(
             SenquipSensorEntity(
