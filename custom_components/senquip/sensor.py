@@ -91,6 +91,59 @@ def _resolve_sensor_meta(
             icon="mdi:numeric",
         )
 
+    # DM1 (Diagnostic Trouble Code) sensors
+    if ".dm1." in sensor_key:
+        dm1_field = sensor_key.split(".dm1.")[1]
+        dm1_meta: dict[str, SensorMeta] = {
+            "active_fault": SensorMeta(
+                name="DM1 Active Fault",
+                state_class=None,
+                icon="mdi:engine",
+            ),
+            "protect_lamp": SensorMeta(
+                name="DM1 Protect Lamp",
+                state_class=None,
+                icon="mdi:alert-circle",
+            ),
+            "amber_warning": SensorMeta(
+                name="DM1 Amber Warning",
+                state_class=None,
+                icon="mdi:alert",
+            ),
+            "red_stop": SensorMeta(
+                name="DM1 Red Stop",
+                state_class=None,
+                icon="mdi:alert-octagon",
+            ),
+            "mil": SensorMeta(
+                name="DM1 MIL Lamp",
+                state_class=None,
+                icon="mdi:engine-outline",
+            ),
+            "active_spn": SensorMeta(
+                name="DM1 Active SPN",
+                state_class=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                icon="mdi:identifier",
+            ),
+            "active_fmi": SensorMeta(
+                name="DM1 Active FMI",
+                state_class=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                icon="mdi:identifier",
+            ),
+            "occurrence_count": SensorMeta(
+                name="DM1 Occurrence Count",
+                state_class=SensorStateClass.MEASUREMENT,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                icon="mdi:counter",
+            ),
+        }
+        return dm1_meta.get(
+            dm1_field,
+            SensorMeta(name=f"DM1 {dm1_field}", state_class=None),
+        )
+
     # Events
     if sensor_key == "events.last":
         return SensorMeta(

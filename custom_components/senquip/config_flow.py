@@ -33,7 +33,7 @@ from .const import (
     KNOWN_INTERNAL_SENSORS,
 )
 from .j1939_database import PGN_DATABASE, SPN_DATABASE
-from .j1939_decoder import J1939Decoder
+from .j1939_decoder import DM1_PGN, J1939Decoder
 from .j1939_profile_loader import discover_profiles, merge_databases
 
 _LOGGER = logging.getLogger(__name__)
@@ -303,8 +303,10 @@ def _build_profile_decoder(profile_names: list[str]) -> J1939Decoder:
 
     custom_dir = Path(__file__).parent / "j1939_custom"
     profile_paths = [custom_dir / name for name in profile_names]
-    pgn_db, spn_db = merge_databases(PGN_DATABASE, SPN_DATABASE, profile_paths)
-    return J1939Decoder(pgn_db, spn_db)
+    pgn_db, spn_db, dm1_config = merge_databases(
+        PGN_DATABASE, SPN_DATABASE, profile_paths
+    )
+    return J1939Decoder(pgn_db, spn_db, dm1_config)
 
 
 def _classify_payload(
@@ -326,11 +328,19 @@ def _classify_payload(
             category = key.upper()
             sensors: list[DiscoveredSensor] = []
             seen_spns: set[int] = set()
+            has_dm1 = False
 
             for frame in value:
                 can_id = frame.get("id")
                 hex_data = frame.get("data")
                 if can_id is None or hex_data is None:
+                    continue
+
+                _, pgn, _ = decoder.extract_pgn(can_id)
+
+                # DM1 frame — flag for DM1 sensor discovery
+                if pgn == DM1_PGN:
+                    has_dm1 = True
                     continue
 
                 decoded = decoder.decode_frame(can_id, hex_data)
@@ -358,7 +368,6 @@ def _classify_payload(
                         )
                 else:
                     # Unknown PGN
-                    _, pgn, _ = decoder.extract_pgn(can_id)
                     sensors.append(
                         DiscoveredSensor(
                             key=f"{key}.raw.{pgn}",
@@ -369,6 +378,68 @@ def _classify_payload(
                             default_selected=False,
                         )
                     )
+
+            # Add DM1 sensors if a DM1 frame was found on this port
+            if has_dm1:
+                dm1_sensors = [
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.active_fault",
+                        name="DM1 Active Fault",
+                        sample_value="No Active Fault",
+                        unit=None,
+                        default_selected=True,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.protect_lamp",
+                        name="DM1 Protect Lamp",
+                        sample_value="Off",
+                        unit=None,
+                        default_selected=True,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.amber_warning",
+                        name="DM1 Amber Warning",
+                        sample_value="Off",
+                        unit=None,
+                        default_selected=True,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.red_stop",
+                        name="DM1 Red Stop",
+                        sample_value="Off",
+                        unit=None,
+                        default_selected=True,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.mil",
+                        name="DM1 MIL Lamp",
+                        sample_value="Off",
+                        unit=None,
+                        default_selected=False,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.active_spn",
+                        name="DM1 Active SPN",
+                        sample_value=0,
+                        unit=None,
+                        default_selected=False,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.active_fmi",
+                        name="DM1 Active FMI",
+                        sample_value=0,
+                        unit=None,
+                        default_selected=False,
+                    ),
+                    DiscoveredSensor(
+                        key=f"{key}.dm1.occurrence_count",
+                        name="DM1 Occurrence Count",
+                        sample_value=0,
+                        unit=None,
+                        default_selected=False,
+                    ),
+                ]
+                sensors.extend(dm1_sensors)
 
             if sensors:
                 result[category] = sensors

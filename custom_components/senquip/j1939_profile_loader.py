@@ -8,11 +8,21 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .j1939_database import PGNDefinition, SPNDefinition
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DM1Config:
+    """Configuration for DM1 (Diagnostic Message 1) decoding."""
+
+    spn_encoding: str = "little_endian"  # "little_endian" or "big_endian"
+    ports: tuple[str, ...] = ()  # CAN ports using this encoding (empty = all)
+    custom_fault_spns: dict[int, str] = field(default_factory=dict)
 
 
 def discover_profiles(custom_dir: Path) -> dict[str, str]:
@@ -42,16 +52,54 @@ def discover_profiles(custom_dir: Path) -> dict[str, str]:
     return profiles
 
 
+def _parse_dm1_config(data: dict, filepath: Path) -> DM1Config | None:
+    """Parse the optional dm1 section from a profile."""
+    dm1_data = data.get("dm1")
+    if dm1_data is None:
+        return None
+
+    if not isinstance(dm1_data, dict):
+        _LOGGER.warning("Invalid dm1 section in %s: must be an object", filepath.name)
+        return None
+
+    spn_encoding = dm1_data.get("spn_encoding", "little_endian")
+    if spn_encoding not in ("little_endian", "big_endian"):
+        _LOGGER.warning(
+            "Invalid dm1.spn_encoding in %s: %s", filepath.name, spn_encoding
+        )
+        spn_encoding = "little_endian"
+
+    ports_raw = dm1_data.get("ports", [])
+    if not isinstance(ports_raw, list):
+        ports_raw = []
+    ports = tuple(str(p) for p in ports_raw)
+
+    custom_faults: dict[int, str] = {}
+    faults_raw = dm1_data.get("custom_fault_spns", {})
+    if isinstance(faults_raw, dict):
+        for spn_str, name in faults_raw.items():
+            try:
+                custom_faults[int(spn_str)] = str(name)
+            except (ValueError, TypeError):
+                pass
+
+    return DM1Config(
+        spn_encoding=spn_encoding,
+        ports=ports,
+        custom_fault_spns=custom_faults,
+    )
+
+
 def load_profile(
     filepath: Path,
-) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition]]:
+) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None]:
     """Load a J1939 profile from JSON file.
 
     Args:
         filepath: Path to the JSON profile file.
 
     Returns:
-        Tuple of (pgn_database, spn_database) containing parsed definitions.
+        Tuple of (pgn_database, spn_database, dm1_config).
 
     Raises:
         ValueError: If the profile is invalid or missing required fields.
@@ -82,9 +130,9 @@ def load_profile(
             pgn_num = int(pgn_str)
             if not isinstance(pgn_obj, dict):
                 raise ValueError("PGN definition must be an object")
-            for field in ("name", "acronym", "length", "spns"):
-                if field not in pgn_obj:
-                    raise ValueError(f"Missing required field '{field}'")
+            for req_field in ("name", "acronym", "length", "spns"):
+                if req_field not in pgn_obj:
+                    raise ValueError(f"Missing required field '{req_field}'")
             if not isinstance(pgn_obj["name"], str):
                 raise ValueError("PGN 'name' must be a string")
             if not isinstance(pgn_obj["acronym"], str):
@@ -124,9 +172,9 @@ def load_profile(
                 "offset",
                 "unit",
             )
-            for field in required_fields:
-                if field not in spn_obj:
-                    raise ValueError(f"Missing required field '{field}'")
+            for req_field in required_fields:
+                if req_field not in spn_obj:
+                    raise ValueError(f"Missing required field '{req_field}'")
             if not isinstance(spn_obj["name"], str):
                 raise ValueError("SPN 'name' must be a string")
             if not isinstance(spn_obj["pgn"], int):
@@ -193,14 +241,16 @@ def load_profile(
             % (filepath.name, spn_num, pgn_num)
         )
 
-    return pgn_db, spn_db
+    dm1_config = _parse_dm1_config(data, filepath)
+
+    return pgn_db, spn_db, dm1_config
 
 
 def merge_databases(
     base_pgn: dict[int, PGNDefinition],
     base_spn: dict[int, SPNDefinition],
     profile_paths: list[Path],
-) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition]]:
+) -> tuple[dict[int, PGNDefinition], dict[int, SPNDefinition], DM1Config | None]:
     """Merge base databases with custom profiles.
 
     Custom profiles override built-in definitions. Later profiles in the list
@@ -212,18 +262,21 @@ def merge_databases(
         profile_paths: List of profile file paths to merge.
 
     Returns:
-        Tuple of (merged_pgn_db, merged_spn_db).
+        Tuple of (merged_pgn_db, merged_spn_db, dm1_config).
     """
     merged_pgn = dict(base_pgn)
     merged_spn = dict(base_spn)
+    dm1_config: DM1Config | None = None
 
     for profile_path in profile_paths:
         try:
-            custom_pgn, custom_spn = load_profile(profile_path)
+            custom_pgn, custom_spn, profile_dm1 = load_profile(profile_path)
             merged_pgn.update(custom_pgn)
             merged_spn.update(custom_spn)
+            if profile_dm1 is not None:
+                dm1_config = profile_dm1
             _LOGGER.debug("Loaded J1939 profile: %s", profile_path.name)
         except (ValueError, FileNotFoundError, json.JSONDecodeError) as err:
             _LOGGER.error("Failed to load profile %s: %s", profile_path.name, err)
 
-    return merged_pgn, merged_spn
+    return merged_pgn, merged_spn, dm1_config

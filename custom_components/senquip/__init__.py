@@ -21,7 +21,7 @@ from .const import (
     PLATFORMS,
 )
 from .j1939_database import PGN_DATABASE, SPN_DATABASE
-from .j1939_decoder import J1939Decoder
+from .j1939_decoder import DM1_PGN, J1939Decoder
 from .j1939_profile_loader import merge_databases
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,10 +46,10 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         custom_dir = Path(__file__).parent / "j1939_custom"
         profile_paths = [custom_dir / name for name in profile_names]
 
-        self._pgn_db, self._spn_db = merge_databases(
+        self._pgn_db, self._spn_db, self._dm1_config = merge_databases(
             PGN_DATABASE, SPN_DATABASE, profile_paths
         )
-        self._decoder = J1939Decoder(self._pgn_db, self._spn_db)
+        self._decoder = J1939Decoder(self._pgn_db, self._spn_db, self._dm1_config)
 
         self._unsubscribe: Any = None
         self.diagnostics: dict[str, Any] = {}
@@ -124,7 +124,6 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                     _, pgn, source = self._decoder.extract_pgn(can_id)
                     pgn_def = self._decoder.get_pgn_info(can_id)
-                    decoded = self._decoder.decode_frame(can_id, hex_data)
 
                     frame_diag: dict[str, Any] = {
                         "can_id": can_id,
@@ -133,8 +132,61 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "pgn_hex": f"0x{pgn:04X}",
                         "source_address": source,
                         "data": hex_data,
-                        "known": pgn_def is not None,
+                        "known": pgn_def is not None or pgn == DM1_PGN,
                     }
+
+                    # DM1 (Diagnostic Trouble Codes) — special handling
+                    if pgn == DM1_PGN:
+                        try:
+                            dm1_bytes = bytes.fromhex(hex_data)
+                        except ValueError:
+                            port_diag.append(frame_diag)
+                            continue
+
+                        big_endian = self._decoder.is_dm1_big_endian(key)
+                        dm1 = self._decoder.decode_dm1(
+                            dm1_bytes, big_endian_spn=big_endian
+                        )
+                        if dm1 is not None:
+                            custom_faults = (
+                                self._decoder.get_dm1_custom_fault_spns()
+                            )
+                            fault_desc = self._decoder.get_fault_description(
+                                dm1.active_spn, dm1.active_fmi, custom_faults
+                            )
+
+                            dm1_sensors = {
+                                f"{key}.dm1.protect_lamp": "Active" if dm1.lamp_protect else "Off",
+                                f"{key}.dm1.amber_warning": "Active" if dm1.lamp_amber else "Off",
+                                f"{key}.dm1.red_stop": "Active" if dm1.lamp_red else "Off",
+                                f"{key}.dm1.mil": "Active" if dm1.lamp_mil else "Off",
+                                f"{key}.dm1.active_spn": dm1.active_spn,
+                                f"{key}.dm1.active_fmi": dm1.active_fmi,
+                                f"{key}.dm1.active_fault": fault_desc,
+                                f"{key}.dm1.occurrence_count": dm1.occurrence_count,
+                            }
+                            for sk, sv in dm1_sensors.items():
+                                if sk in self._selected:
+                                    data[sk] = sv
+
+                            frame_diag["pgn_name"] = "DM1 - Active DTCs"
+                            frame_diag["pgn_acronym"] = "DM1"
+                            frame_diag["dm1"] = {
+                                "lamp_protect": dm1.lamp_protect,
+                                "lamp_amber": dm1.lamp_amber,
+                                "lamp_red": dm1.lamp_red,
+                                "lamp_mil": dm1.lamp_mil,
+                                "active_spn": dm1.active_spn,
+                                "active_fmi": dm1.active_fmi,
+                                "active_fault": fault_desc,
+                                "occurrence_count": dm1.occurrence_count,
+                                "encoding": "big_endian" if big_endian else "little_endian",
+                            }
+
+                        port_diag.append(frame_diag)
+                        continue
+
+                    decoded = self._decoder.decode_frame(can_id, hex_data)
 
                     if pgn_def:
                         frame_diag["pgn_name"] = pgn_def.name
