@@ -300,7 +300,9 @@ class SenquipConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_select_signals()
 
         if not self._available_profiles:
-            self._available_profiles = discover_profiles(_profile_dir())
+            self._available_profiles = await self.hass.async_add_executor_job(
+                discover_profiles, _profile_dir()
+            )
 
         if user_input is not None:
             for port in active_can_ports:
@@ -545,7 +547,9 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_select_signals()
 
         if not self._available_profiles:
-            self._available_profiles = discover_profiles(_profile_dir())
+            self._available_profiles = await self.hass.async_add_executor_job(
+                discover_profiles, _profile_dir()
+            )
 
         if user_input is not None:
             for port in active_can_ports:

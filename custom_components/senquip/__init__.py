@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .can_profiles.loader import discover_profiles
+from .can_profiles.loader import CANProfile, discover_profiles
 from .can_protocols.registry import get_can_protocol
 from .const import (
     CAN_PORTS,
@@ -23,7 +23,9 @@ from .const import (
     CONF_PORT_CONFIGS,
     CONF_SELECTED_SIGNALS,
     DOMAIN,
+    KNOWN_INTERNAL_SENSORS,
     PLATFORMS,
+    SensorStateClass,
     deserialize_port_configs,
 )
 
@@ -33,7 +35,12 @@ _LOGGER = logging.getLogger(__name__)
 class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinate MQTT data for a single Senquip device."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        available_profiles: dict[str, CANProfile],
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -43,10 +50,11 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_id: str = entry.data[CONF_DEVICE_ID]
         self._selected: set[str] = set(entry.data[CONF_SELECTED_SIGNALS])
         self._port_configs = deserialize_port_configs(entry.data.get(CONF_PORT_CONFIGS))
-        self._available_profiles = discover_profiles(Path(__file__).parent / CAN_PROFILE_DIR)
+        self._available_profiles = available_profiles
 
         self._can_runtime: dict[str, tuple[Any, Any]] = {}
         self._profile_errors: dict[str, list[str]] = {}
+        self._state_class_cache: dict[str, SensorStateClass | None] = {}
         for port in CAN_PORTS:
             config = self._port_configs.get(port)
             if config is None or not config.active or config.protocol is None:
@@ -122,11 +130,11 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         data = self._parse_payload(payload)
-        updates = self._sanitize_updates(data)
-
         current_data: dict[str, Any] = {}
         if isinstance(self.data, dict):
             current_data = self.data
+
+        updates = self._sanitize_updates(data, current_data)
 
         merged_data = dict(current_data)
         merged_data.update(updates)
@@ -141,13 +149,88 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return isinstance(value, (str, int, float, bool))
 
-    def _sanitize_updates(self, updates: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _is_numeric_state_value(value: Any) -> bool:
+        """Return whether a state value can be compared numerically."""
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return math.isfinite(float(value))
+        return False
+
+    def _resolve_state_class(self, signal_key: str) -> SensorStateClass | None:
+        """Resolve and cache the state class for a signal key."""
+        if signal_key in self._state_class_cache:
+            return self._state_class_cache[signal_key]
+
+        state_class: SensorStateClass | None = None
+
+        if signal_key.startswith("internal.main."):
+            json_key = signal_key.removeprefix("internal.main.")
+            meta = KNOWN_INTERNAL_SENSORS.get(json_key)
+            if meta is not None:
+                state_class = meta.state_class
+        elif signal_key.startswith("can."):
+            parts = signal_key.split(".")
+            if len(parts) >= 4:
+                port_id = parts[1]
+                runtime = self._can_runtime.get(port_id)
+                if runtime is not None:
+                    protocol, decoder = runtime
+                    meta = protocol.resolve_signal_meta(signal_key, decoder)
+                    state_class = meta.state_class
+
+        self._state_class_cache[signal_key] = state_class
+        return state_class
+
+    def _is_erroneous_total_increasing_regression(
+        self,
+        signal_key: str,
+        old_value: Any,
+        new_value: Any,
+    ) -> bool:
+        """Return whether a small regression should be ignored for total_increasing."""
+        if self._resolve_state_class(signal_key) != SensorStateClass.TOTAL_INCREASING:
+            return False
+        if not self._is_numeric_state_value(old_value):
+            return False
+        if not self._is_numeric_state_value(new_value):
+            return False
+
+        previous = float(old_value)
+        current = float(new_value)
+        if current >= previous:
+            return False
+
+        # Mirror HA meter-cycle tolerance: treat small drops (<10%) as noisy regressions.
+        if previous > 0 and current > previous * 0.9:
+            _LOGGER.debug(
+                "Ignoring small regression for total_increasing sensor %s: %s -> %s",
+                signal_key,
+                old_value,
+                new_value,
+            )
+            return True
+        return False
+
+    def _sanitize_updates(
+        self,
+        updates: dict[str, Any],
+        current_data: dict[str, Any],
+    ) -> dict[str, Any]:
         """Filter invalid values from a partial payload update."""
-        return {
-            key: value
-            for key, value in updates.items()
-            if self._is_valid_state_value(value)
-        }
+        sanitized: dict[str, Any] = {}
+        for key, value in updates.items():
+            if not self._is_valid_state_value(value):
+                continue
+            if key in current_data and self._is_erroneous_total_increasing_regression(
+                key,
+                current_data[key],
+                value,
+            ):
+                continue
+            sanitized[key] = value
+        return sanitized
 
     def _parse_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Parse raw JSON into a flat {signal_key: value} dict."""
@@ -197,7 +280,10 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Senquip Telemetry from a config entry."""
-    coordinator = SenquipDataCoordinator(hass, entry)
+    available_profiles = await hass.async_add_executor_job(
+        discover_profiles, Path(__file__).parent / CAN_PROFILE_DIR
+    )
+    coordinator = SenquipDataCoordinator(hass, entry, available_profiles)
     await coordinator.async_subscribe()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

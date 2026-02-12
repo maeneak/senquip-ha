@@ -9,6 +9,8 @@ from custom_components.senquip.const import (
     CONF_DEVICE_ID,
     CONF_PORT_CONFIGS,
     CONF_SELECTED_SIGNALS,
+    SensorMeta,
+    SensorStateClass,
 )
 from tests.ha_stubs import ConfigEntry, _MQTTModels
 
@@ -21,7 +23,7 @@ def _build_coordinator(selected_signals: list[str]) -> SenquipDataCoordinator:
             CONF_PORT_CONFIGS: {},
         }
     )
-    return SenquipDataCoordinator(None, entry)
+    return SenquipDataCoordinator(None, entry, {})
 
 
 def _message(payload: dict) -> _MQTTModels.ReceiveMessage:
@@ -91,3 +93,45 @@ def test_valid_update_overwrites_previous_value():
     )
 
     assert coordinator.data["event.main.last"] == "New Event"
+
+
+def test_small_total_increasing_regression_is_ignored_for_internal_counter():
+    coordinator = _build_coordinator(["internal.main.motion"])
+    coordinator.data = {"internal.main.motion": 244.0}
+
+    coordinator._handle_message(_message({"deviceid": "DEV1", "motion": 240}))
+
+    assert coordinator.data["internal.main.motion"] == 244.0
+
+
+def test_large_total_increasing_drop_is_kept_as_possible_new_cycle():
+    coordinator = _build_coordinator(["internal.main.motion"])
+    coordinator.data = {"internal.main.motion": 244.0}
+
+    coordinator._handle_message(_message({"deviceid": "DEV1", "motion": 10}))
+
+    assert coordinator.data["internal.main.motion"] == 10
+
+
+class _ProtocolStub:
+    def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
+        return {"can.can1.j1939.spn247": 62395000}, []
+
+    def resolve_signal_meta(self, _signal_key, _decoder):
+        return SensorMeta(
+            name="Engine Total Revolutions",
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            unit="h",
+        )
+
+
+def test_small_total_increasing_regression_is_ignored_for_can_counter():
+    coordinator = _build_coordinator(["can.can1.j1939.spn247"])
+    coordinator._can_runtime = {"can1": (_ProtocolStub(), None)}
+    coordinator.data = {"can.can1.j1939.spn247": 62396000.0}
+
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "00"}]})
+    )
+
+    assert coordinator.data["can.can1.j1939.spn247"] == 62396000.0
