@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,32 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         data = self._parse_payload(payload)
-        self.async_set_updated_data(data)
+        updates = self._sanitize_updates(data)
+
+        current_data: dict[str, Any] = {}
+        if isinstance(self.data, dict):
+            current_data = self.data
+
+        merged_data = dict(current_data)
+        merged_data.update(updates)
+        self.async_set_updated_data(merged_data)
+
+    @staticmethod
+    def _is_valid_state_value(value: Any) -> bool:
+        """Return whether a parsed value can be published as sensor state."""
+        if value is None:
+            return False
+        if isinstance(value, float) and not math.isfinite(value):
+            return False
+        return isinstance(value, (str, int, float, bool))
+
+    def _sanitize_updates(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Filter invalid values from a partial payload update."""
+        return {
+            key: value
+            for key, value in updates.items()
+            if self._is_valid_state_value(value)
+        }
 
     def _parse_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Parse raw JSON into a flat {signal_key: value} dict."""
@@ -155,7 +181,9 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if "event.main.last" in self._selected and value:
                     last_event = value[-1]
                     if isinstance(last_event, dict):
-                        data["event.main.last"] = last_event.get("msg", "")
+                        msg_value = last_event.get("msg")
+                        if msg_value is not None:
+                            data["event.main.last"] = str(msg_value)
                 continue
 
             if isinstance(value, (int, float, str)):
