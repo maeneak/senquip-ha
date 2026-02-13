@@ -45,8 +45,9 @@ class TestRuntimeDecode:
     def test_man_profile_decodes_proprietary_spn(self):
         protocol, decoder = _build_decoder(with_man_profile=True)
         selected = {"can.can2.j1939.spn800001"}
-        values, _ = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
-        assert "can.can2.j1939.spn800001" in values
+        values, diagnostics = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
+        assert "can.can2.j1939.spn800001" not in values
+        assert any("800001" in frame.get("spns", {}) for frame in diagnostics)
 
     def test_dm1_keys_emitted_when_selected(self):
         protocol, decoder = _build_decoder(with_man_profile=True)
@@ -55,3 +56,12 @@ class TestRuntimeDecode:
         values, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
         assert "can.can2.j1939.dm1.active_fault" in values
         assert "can.can2.j1939.dm1.active_spn" in values
+
+    def test_unavailable_spn_not_emitted_in_runtime_values(self):
+        protocol, decoder = _build_decoder()
+        frames = [{"id": 0x18FEEE00, "data": "FFFFFFFFFFFFFFFF"}]
+        selected = {"can.can2.j1939.spn110"}
+        values, diagnostics = protocol.decode_runtime(frames, "can2", selected, decoder)
+
+        assert "can.can2.j1939.spn110" not in values
+        assert diagnostics[0]["spns"]["110"]["value"] is None

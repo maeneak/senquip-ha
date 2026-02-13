@@ -2,3 +2,6 @@
 /.pytest_cache
 /tests/__pycache__
 /custom_components/senquip/__pycache__
+/custom_components/senquip/can_profiles/__pycache__
+/custom_components/senquip/can_protocols/__pycache__
+/custom_components/senquip/can_protocols/j1939/__pycache__

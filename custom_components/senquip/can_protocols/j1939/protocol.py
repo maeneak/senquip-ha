@@ -226,7 +226,7 @@ class J1939CANProtocol:
 
             for spn_num, spn_value in decoded.items():
                 key = f"can.{port_id}.j1939.spn{spn_num}"
-                if key in selected_signals:
+                if key in selected_signals and spn_value is not None:
                     values[key] = spn_value
             if not decoded:
                 raw_key = f"can.{port_id}.j1939.raw.{pgn}"
