@@ -90,11 +90,11 @@ Internal: Cp32 (18.4)
 
 Internal: Cp33 (65.9)
 
-CAN1: Unknown PGN 65288 (0xFF08) (FFFFFFFFFFFFFFFF)
+CAN1: Unknown PGN 65288 (0xFF08) (FFFFFFFFFFFFFFFF) P
 
-CAN1: Unknown PGN 65247 (0xFEDF) (7DC02B7DFBFFFFFC)
+CAN1: Unknown PGN 65247 (0xFEDF) (7DC02B7DFBFFFFFC) EEC
 
-CAN1: Unknown PGN 65276 (0xFEFC) (FF00FF00FFFF0000)
+CAN1: Unknown PGN 65276 (0xFEFC) (FF00FF00FFFF0000) Fuel Level
 
 CAN1: Unknown PGN 65287 (0xFF07) (000000000000FFFF)
 
@@ -120,9 +120,9 @@ CAN1: Remote Accelerator Pedal Position (EEC2)
 
 CAN1: Accelerator Pedal Position 2 (EEC2) (25.2 %)
 
-CAN1: Unknown PGN 130886 (0x1FF46) (2182FFFFFFFFFFFF)
+CAN1: Unknown PGN 130886 (0x1FF46) (2182FFFFFFFFFFFF) fluid level data
 
-CAN1: Unknown PGN 65307 (0xFF1B) (44FFFFFFFFFFFFFF)
+CAN1: Unknown PGN 65307 (0xFF1B) (44FFFFFFFFFFFFFF) P - PropB_PDU2
 
 CAN1: Unknown PGN 65129 (0xFE69) (FFFFFFFFFFFFFFFF)
 
@@ -152,9 +152,10 @@ CAN1: Transmission Oil Temperature (TF) (0.0 deg C)
 
 CAN1: Unknown PGN 65189 (0xFEA5) (FFFFFFFFFFFFFFFF)
 
-CAN1: Unknown PGN 64914 (0xFD92) (F40100FFFFFFFFFF)
+CAN1: Unknown PGN 64914 (0xFD92) (F40100FFFFFFFFFF) Engine Operating Info
 
-CAN1: Unknown PGN 64775 (0xFD07) (030FFCFFFFFFFFFF)
+CAN1: Unknown PGN 64775 (0xFD07) (030FFCFFFFFFFFFF) Transmission Oil Temperature | High Lamp Command | Transmission Oil Pressure Low Lamp Command
+
 
 CAN1: Fuel Delivery Pressure (EFL/P1)
 
@@ -170,7 +171,7 @@ CAN1: Engine Coolant Pressure (EFL/P1)
 
 CAN1: Engine Coolant Level (EFL/P1) (100.0 %)
 
-CAN1: Unknown PGN 65243 (0xFEDB) (FFFF6062FFFFFFFF)
+CAN1: Unknown PGN 65243 (0xFEDB) (FFFF6062FFFFFFFF) Engine Fluid Level/Pressure 2
 
 CAN1: Unknown PGN 57344 (0xE000) (FFFFFFFFFFF0FFFF)
 
@@ -194,7 +195,7 @@ CAN1: Unknown PGN 65190 (0xFEA6) (FFFFFFFFFFFFFFFF)
 
 CAN1: Unknown PGN 64735 (0xFCDF) (FFFFFFFFFFFFFFFF)
 
-CAN1: Unknown PGN 64721 (0xFCD1) (03FF00000000FFFF)
+CAN1: Unknown PGN 64721 (0xFCD1) (03FF00000000FFFF) Active Service Only DTCs
 
 CAN1: Engine Total Hours of Operation (HOURS) (734.05 h)
 
@@ -244,9 +245,9 @@ CAN1: Air Inlet Temperature (AMB)
 
 CAN1: Road Surface Temperature (AMB)
 
-CAN1: Unknown PGN 65188 (0xFEA4) (FFFFEF26FFFF2022)
+CAN1: Unknown PGN 65188 (0xFEA4) (FFFFEF26FFFF2022) Engine Temperature 2
 
-CAN1: Unknown PGN 64743 (0xFCE7) (7D7D7D7D7D7D7DFF)
+CAN1: Unknown PGN 64743 (0xFCE7) (7D7D7D7D7D7D7DFF) Engine Configuration 3
 
 CAN1: DM1 Active Fault (No Active Fault)
 
@@ -397,3 +398,36 @@ CAN2: DM1 Active SPN (0)
 CAN2: DM1 Active FMI (0)
 
 CAN2: DM1 Occurrence Count (0)
+
+## Investigation Notes (2026-02-13)
+
+Target PGNs reviewed: `65243`, `65188`, `65307`.
+
+### Evidence used
+
+- Current configflow snapshot in this file:
+  - `65243` at `diag/UnkownPGN.md:174` -> `FFFF6062FFFFFFFF`
+  - `65188` at `diag/UnkownPGN.md:248` -> `FFFFEF26FFFF2022`
+  - `65307` at `diag/UnkownPGN.md:125` -> `44FFFFFFFFFFFFFF`
+- Additional sample snapshot in `example.md`:
+  - `65188` -> `FFFFBE26FFFF2022`
+  - `65243` -> `FFFF6662FFFFFFFF`
+  - `65307` -> `42FFFFFFFFFFFFFF`
+- SAE J1939DA index entries (via ISOBUS):
+  - PGN `65188` (ET2): SPNs `1135`, `1136`, `411`, `412`
+  - PGN `65243` (EFL/P2): SPNs `164`, `157`, `156`, `1349`
+  - PGN `65307` (PropB_1B): SPN `2551` ("Manufacturer Defined Usage")
+
+### Findings and recommendation
+
+| PGN | Classification | Payload behavior | Usefulness | Recommendation |
+|---|---|---|---|---|
+| 65243 | Standard J1939 (`EFL/P2`) | Bytes 3-4 are non-`FF` and change (`6062` -> `6662`); remaining bytes are `FF` | At least one real, live signal appears present; others likely not available on this ECU | **Add to J1939 support list** (DBC-confirmed PGN), then map SPN byte/scaling from DBC/OEM |
+| 65188 | Standard J1939 (`ET2`) | Bytes 3-4 change (`EF26` -> `BE26`), bytes 7-8 are populated (`2022`), bytes 1-2 and 5-6 are `FF` | Likely at least one real temperature-related signal | **Add to J1939 support list** (DBC-confirmed PGN), then map SPN byte/scaling from DBC/OEM |
+| 65307 | J1939 Proprietary B (`PropB_1B`) | Only byte 1 changes (`42`/`44`); all other bytes `FF` | Indicates proprietary status bits, not standard portable SPNs | **Do not add** to base J1939 spec; only add in a vendor profile if OEM bit definitions are available |
+
+### DBC confirmation provided
+
+- `CAN ID 419355646` (`0x18FEDBFE`) decodes to PGN `65243` (`EFL/P2`), SA `0xFE`, Priority `6`.
+- `CAN ID 419341566` (`0x18FEA4FE`) decodes to PGN `65188` (`ET2`), SA `0xFE`, Priority `6`.
+- Both are marked as present in the J1939 DBC (`In DBC? = J1939 DBC`).

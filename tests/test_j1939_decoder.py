@@ -29,7 +29,9 @@ class TestExtractPGN:
             (217056256, 61444, "EEC1 — 0x0CF00400"),
             (217056000, 61443, "EEC2 — 0x0CF00300"),
             (0x18FEEE00, 65262, "ET1 — constructed"),
+            (0x18FEA4FE, 65188, "ET2 — 0x18FEA4FE"),
             (419360512, 65263, "EFL/P1 — 0x18FEEF00"),
+            (0x18FEDBFE, 65243, "EFL/P2 — 0x18FEDBFE"),
             (0x18FEF100, 65265, "CCVS1 — constructed"),
             (419357952, 65253, "HOURS — 0x18FEE500"),
             (419358976, 65257, "LFC — 0x18FEE900"),
@@ -208,6 +210,22 @@ class TestDecodeFrame:
         results = decoder.decode_frame(0x18FEF100, "FF0F32000000FFFF")
         assert results[84] is not None
         assert abs(results[84] - 50.0586) < 0.01
+
+    def test_et2_frame(self, decoder):
+        """ET2 frame: verify populated SPNs decode and 0xFFFF fields become None."""
+        results = decoder.decode_frame(0x18FEA4FE, "FFFFEF26FFFF2022")
+        assert results[1135] is None
+        assert results[1136] == 38.4688
+        assert results[411] is None
+        assert results[412] == 0.0
+
+    def test_eflp2_frame(self, decoder):
+        """EFL/P2 frame: only SPN 157 populated in sample payload."""
+        results = decoder.decode_frame(0x18FEDBFE, "FFFF6062FFFFFFFF")
+        assert results[164] is None
+        assert results[157] == 98.375
+        assert results[156] is None
+        assert results[1349] is None
 
 
 # ---------------------------------------------------------------------------
