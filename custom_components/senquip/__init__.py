@@ -28,6 +28,7 @@ from .const import (
     SensorStateClass,
     deserialize_port_configs,
 )
+from .signal_keys import LEGACY_SELECTED_SENSORS_KEY, normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -280,6 +281,15 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Senquip Telemetry from a config entry."""
+    normalized_selected = normalize_selected_signals(entry.data)
+    legacy_present = LEGACY_SELECTED_SENSORS_KEY in entry.data
+    current_selected = entry.data.get(CONF_SELECTED_SIGNALS)
+    if legacy_present or current_selected != normalized_selected:
+        new_data = dict(entry.data)
+        new_data[CONF_SELECTED_SIGNALS] = normalized_selected
+        new_data.pop(LEGACY_SELECTED_SENSORS_KEY, None)
+        hass.config_entries.async_update_entry(entry, data=new_data)
+
     available_profiles = await hass.async_add_executor_job(
         discover_profiles, Path(__file__).parent / CAN_PROFILE_DIR
     )

@@ -42,6 +42,7 @@ from .const import (
     deserialize_port_configs,
     serialize_port_configs,
 )
+from .signal_keys import normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -637,7 +638,7 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
             await self.hass.config_entries.async_reload(self._config_entry.entry_id)
             return self.async_create_entry(title="", data={})
 
-        current_selected = set(self._config_entry.data.get(CONF_SELECTED_SIGNALS, []))
+        current_selected = set(normalize_selected_signals(self._config_entry.data))
         options: list[SelectOptionDict] = []
         defaults: list[str] = []
         for category, signals in self._discovered_signals.items():
