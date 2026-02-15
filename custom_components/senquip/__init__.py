@@ -54,6 +54,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._available_profiles = available_profiles
 
         self._can_runtime: dict[str, tuple[Any, Any]] = {}
+        self._can_port_available: dict[str, bool] = {}
         self._profile_errors: dict[str, list[str]] = {}
         self._state_class_cache: dict[str, SensorStateClass | None] = {}
         for port in CAN_PORTS:
@@ -85,6 +86,10 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def get_can_runtime(self, port_id: str) -> tuple[Any, Any] | None:
         """Return protocol/decoder tuple for a CAN port if available."""
         return self._can_runtime.get(port_id)
+
+    def is_can_port_available(self, port_id: str) -> bool:
+        """Return whether a CAN port is producing valid data."""
+        return self._can_port_available.get(port_id, True)
 
     async def async_subscribe(self) -> None:
         """Subscribe to the device's MQTT topic."""
@@ -139,6 +144,15 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         merged_data = dict(current_data)
         merged_data.update(updates)
+
+        # Remove stale CAN values for ports that are now unavailable
+        for port_id, available in self._can_port_available.items():
+            if not available:
+                prefix = f"can.{port_id}."
+                for sig_key in list(merged_data):
+                    if sig_key.startswith(prefix):
+                        del merged_data[sig_key]
+
         self.async_set_updated_data(merged_data)
 
     @staticmethod
@@ -254,6 +268,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     decoder,
                 )
                 data.update(port_values)
+                self._can_port_available[key] = bool(port_values)
                 if port_diag:
                     diag[key] = {
                         "protocol": protocol.protocol_id,

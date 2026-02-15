@@ -114,6 +114,8 @@ def test_large_total_increasing_drop_is_kept_as_possible_new_cycle():
 
 
 class _ProtocolStub:
+    """Stub that always returns a valid SPN value."""
+
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
         return {"can.can1.j1939.spn247": 62395000}, []
 
@@ -123,6 +125,29 @@ class _ProtocolStub:
             state_class=SensorStateClass.TOTAL_INCREASING,
             unit="h",
         )
+
+
+class _EmptyProtocolStub:
+    """Stub that returns no valid values (simulates device shutdown)."""
+
+    def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
+        return {}, []
+
+    def resolve_signal_meta(self, _signal_key, _decoder):
+        return SensorMeta(name="Engine Speed")
+
+
+class _ToggleProtocolStub:
+    """Stub whose decode_runtime returns can be controlled externally."""
+
+    def __init__(self):
+        self.values: dict = {}
+
+    def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
+        return dict(self.values), []
+
+    def resolve_signal_meta(self, _signal_key, _decoder):
+        return SensorMeta(name="Engine Speed")
 
 
 def test_small_total_increasing_regression_is_ignored_for_can_counter():
@@ -135,3 +160,112 @@ def test_small_total_increasing_regression_is_ignored_for_can_counter():
     )
 
     assert coordinator.data["can.can1.j1939.spn247"] == 62396000.0
+
+
+# ── CAN port availability tracking ──────────────────────────────────────
+
+
+def test_can_port_unavailable_when_all_spns_invalid():
+    """Port with no valid decoded values is marked unavailable."""
+    coordinator = _build_coordinator(["can.can1.j1939.spn190"])
+    coordinator._can_runtime = {"can1": (_EmptyProtocolStub(), None)}
+
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "FFFFFFFFFFFFFFFF"}]})
+    )
+
+    assert coordinator.is_can_port_available("can1") is False
+
+
+def test_can_port_available_when_spns_valid():
+    """Port with valid decoded values is marked available."""
+    coordinator = _build_coordinator(["can.can1.j1939.spn247"])
+    coordinator._can_runtime = {"can1": (_ProtocolStub(), None)}
+
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "00"}]})
+    )
+
+    assert coordinator.is_can_port_available("can1") is True
+
+
+def test_can_port_defaults_to_available_when_unseen():
+    """A port that hasn't appeared in any payload defaults to available."""
+    coordinator = _build_coordinator(["can.can1.j1939.spn190"])
+    assert coordinator.is_can_port_available("can1") is True
+
+
+def test_can_port_availability_transitions():
+    """Port availability updates correctly when device shuts down and restarts."""
+    stub = _ToggleProtocolStub()
+    coordinator = _build_coordinator(["can.can1.j1939.spn190"])
+    coordinator._can_runtime = {"can1": (stub, None)}
+
+    # Device running — valid data
+    stub.values = {"can.can1.j1939.spn190": 1841.0}
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "00"}]})
+    )
+    assert coordinator.is_can_port_available("can1") is True
+    assert coordinator.data["can.can1.j1939.spn190"] == 1841.0
+
+    # Device shuts down — no valid data
+    stub.values = {}
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "FFFFFFFFFFFFFFFF"}]})
+    )
+    assert coordinator.is_can_port_available("can1") is False
+    assert "can.can1.j1939.spn190" not in coordinator.data
+
+    # Device restarts — valid data again
+    stub.values = {"can.can1.j1939.spn190": 900.0}
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "can1": [{"id": 1, "data": "00"}]})
+    )
+    assert coordinator.is_can_port_available("can1") is True
+    assert coordinator.data["can.can1.j1939.spn190"] == 900.0
+
+
+def test_stale_can_values_cleared_when_port_unavailable():
+    """Previous CAN values are removed when port becomes unavailable."""
+    stub = _ToggleProtocolStub()
+    coordinator = _build_coordinator(
+        ["can.can1.j1939.spn190", "can.can1.j1939.spn247", "internal.main.vin"]
+    )
+    coordinator._can_runtime = {"can1": (stub, None)}
+
+    # Populate with valid CAN and internal data
+    stub.values = {
+        "can.can1.j1939.spn190": 1841.0,
+        "can.can1.j1939.spn247": 503.95,
+    }
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "vin": 28.0, "can1": [{"id": 1, "data": "00"}]})
+    )
+    assert "can.can1.j1939.spn190" in coordinator.data
+    assert "can.can1.j1939.spn247" in coordinator.data
+    assert coordinator.data["internal.main.vin"] == 28.0
+
+    # CAN device shuts down
+    stub.values = {}
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "vin": 28.1, "can1": [{"id": 1, "data": "FF"}]})
+    )
+
+    # CAN values cleared, internal values unaffected
+    assert "can.can1.j1939.spn190" not in coordinator.data
+    assert "can.can1.j1939.spn247" not in coordinator.data
+    assert coordinator.data["internal.main.vin"] == 28.1
+
+
+def test_internal_sensors_unaffected_by_can_port_availability():
+    """Internal sensor availability is independent of CAN port state."""
+    coordinator = _build_coordinator(["internal.main.vin", "can.can1.j1939.spn190"])
+    coordinator._can_runtime = {"can1": (_EmptyProtocolStub(), None)}
+
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "vin": 28.0, "can1": [{"id": 1, "data": "FF"}]})
+    )
+
+    assert coordinator.is_can_port_available("can1") is False
+    assert coordinator.data["internal.main.vin"] == 28.0

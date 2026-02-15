@@ -167,6 +167,17 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
         self._attr_device_info = _build_device_info(sensor_key, device_id, device_name)
 
     @property
+    def available(self) -> bool:
+        """Return whether the sensor is available."""
+        if self._sensor_key.startswith("can."):
+            parts = self._sensor_key.split(".")
+            if len(parts) >= 2:
+                port_id = parts[1]
+                if not self.coordinator.is_can_port_available(port_id):
+                    return False
+        return True
+
+    @property
     def native_value(self) -> StateType:
         """Return current sensor value from coordinator data."""
         if self.coordinator.data is None:
