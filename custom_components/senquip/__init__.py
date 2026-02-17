@@ -11,6 +11,7 @@ from typing import Any
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .can_profiles.loader import CANProfile, discover_profiles
@@ -22,6 +23,7 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_PORT_CONFIGS,
     CONF_SELECTED_SIGNALS,
+    DEVICE_TIMEOUT,
     DOMAIN,
     KNOWN_INTERNAL_SENSORS,
     PLATFORMS,
@@ -81,11 +83,17 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._can_runtime[port] = (protocol, decoder)
 
         self._unsubscribe: Any = None
+        self._device_online: bool = False
+        self._offline_timer: Any = None
         self.diagnostics: dict[str, Any] = {}
 
     def get_can_runtime(self, port_id: str) -> tuple[Any, Any] | None:
         """Return protocol/decoder tuple for a CAN port if available."""
         return self._can_runtime.get(port_id)
+
+    def is_device_online(self) -> bool:
+        """Return whether the device is online (receiving MQTT messages)."""
+        return self._device_online
 
     def is_can_port_available(self, port_id: str) -> bool:
         """Return whether a CAN port is producing valid data."""
@@ -111,9 +119,23 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_unsubscribe(self) -> None:
         """Unsubscribe from MQTT."""
+        if self._offline_timer is not None:
+            self._offline_timer()
+            self._offline_timer = None
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
+
+    @callback
+    def _mark_device_offline(self, _now: Any = None) -> None:
+        """Mark device as offline after timeout with no MQTT messages."""
+        self._device_online = False
+        self._offline_timer = None
+        for port_id in self._can_port_available:
+            self._can_port_available[port_id] = False
+        # Push an update so binary sensors refresh
+        if self.data is not None:
+            self.async_set_updated_data(self.data)
 
     @callback
     def _handle_message(self, msg: mqtt.models.ReceiveMessage) -> None:
@@ -134,6 +156,14 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not isinstance(payload, dict):
             return
+
+        # Reset watchdog timer
+        self._device_online = True
+        if self._offline_timer is not None:
+            self._offline_timer()
+        self._offline_timer = async_call_later(
+            self.hass, DEVICE_TIMEOUT, self._mark_device_offline
+        )
 
         data = self._parse_payload(payload)
         current_data: dict[str, Any] = {}

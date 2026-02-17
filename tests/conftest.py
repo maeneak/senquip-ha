@@ -53,6 +53,11 @@ _ha_sensor.SensorDeviceClass = ha_stubs.SensorDeviceClass
 _ha_sensor.SensorStateClass = ha_stubs.SensorStateClass
 _ha_sensor.SensorEntity = ha_stubs.SensorEntity
 
+# homeassistant.components.binary_sensor
+_ha_binary_sensor = ModuleType("homeassistant.components.binary_sensor")
+_ha_binary_sensor.BinarySensorDeviceClass = ha_stubs.BinarySensorDeviceClass
+_ha_binary_sensor.BinarySensorEntity = ha_stubs.BinarySensorEntity
+
 # homeassistant.config_entries
 _ha_config_entries = ModuleType("homeassistant.config_entries")
 _ha_config_entries.ConfigEntry = ha_stubs.ConfigEntry
@@ -86,6 +91,9 @@ _ha_helpers_platform.AddEntitiesCallback = ha_stubs.AddEntitiesCallback
 _ha_helpers_typing = ModuleType("homeassistant.helpers.typing")
 _ha_helpers_typing.StateType = ha_stubs.StateType
 
+_ha_helpers_event = ModuleType("homeassistant.helpers.event")
+_ha_helpers_event.async_call_later = ha_stubs.async_call_later
+
 # voluptuous stub
 _vol = MagicMock()
 _vol.Schema = lambda x: x
@@ -101,6 +109,7 @@ sys.modules.update({
     "homeassistant.components.mqtt": _ha_mqtt,
     "homeassistant.components.mqtt.models": _ha_mqtt_models,
     "homeassistant.components.sensor": _ha_sensor,
+    "homeassistant.components.binary_sensor": _ha_binary_sensor,
     "homeassistant.config_entries": _ha_config_entries,
     "homeassistant.data_entry_flow": _ha_flow,
     "homeassistant.helpers": _ha_helpers,
@@ -109,5 +118,6 @@ sys.modules.update({
     "homeassistant.helpers.device_registry": _ha_helpers_device,
     "homeassistant.helpers.entity_platform": _ha_helpers_platform,
     "homeassistant.helpers.typing": _ha_helpers_typing,
+    "homeassistant.helpers.event": _ha_helpers_event,
     "voluptuous": _vol,
 })

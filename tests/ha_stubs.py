@@ -16,6 +16,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 class SensorDeviceClass(str, enum.Enum):
+    ENUM = "enum"
     VOLTAGE = "voltage"
     TEMPERATURE = "temperature"
     ILLUMINANCE = "illuminance"
@@ -47,6 +48,29 @@ class SensorEntity:
 
     @property
     def native_value(self):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# homeassistant.components.binary_sensor
+# ---------------------------------------------------------------------------
+
+class BinarySensorDeviceClass(str, enum.Enum):
+    CONNECTIVITY = "connectivity"
+    BATTERY = "battery"
+    MOTION = "motion"
+
+
+class BinarySensorEntity:
+    _attr_has_entity_name: bool = False
+    _attr_unique_id: str | None = None
+    _attr_name: str | None = None
+    _attr_device_class: BinarySensorDeviceClass | None = None
+    _attr_entity_category: Any = None
+    _attr_device_info: Any = None
+
+    @property
+    def is_on(self) -> bool | None:
         return None
 
 
@@ -256,3 +280,14 @@ class _MQTTModels:
 
 
 mqtt_models = _MQTTModels()
+
+
+# ---------------------------------------------------------------------------
+# homeassistant.helpers.event
+# ---------------------------------------------------------------------------
+
+def async_call_later(hass, delay, callback):
+    """Stub — returns a cancel callback. Does not actually schedule."""
+    def cancel():
+        pass
+    return cancel

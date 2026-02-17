@@ -163,6 +163,8 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
             self._attr_entity_category = sensor_meta.entity_category
         if sensor_meta.icon is not None:
             self._attr_icon = sensor_meta.icon
+        if sensor_meta.options is not None:
+            self._attr_options = sensor_meta.options
 
         self._attr_device_info = _build_device_info(sensor_key, device_id, device_name)
 

@@ -82,6 +82,61 @@ class TestJ1939Overlay:
         assert dm1_config is not None
         assert errors == []
 
+    def test_profile_with_states_mapping(self, tmp_path: Path):
+        """Profile SPN with a states mapping is parsed correctly."""
+        _write_json(
+            tmp_path / "gearbox.json",
+            {
+                "name": "Gearbox Test",
+                "base_protocol": "j1939",
+                "protocol_data": {
+                    "j1939": {
+                        "pgns": {
+                            "65308": {
+                                "name": "Aux MAN Engine",
+                                "acronym": "MAN_AUX",
+                                "length": 8,
+                                "spns": [800005],
+                            }
+                        },
+                        "spns": {
+                            "800005": {
+                                "name": "Gearbox Status",
+                                "pgn": 65308,
+                                "start_byte": 1,
+                                "start_bit": 1,
+                                "bit_length": 6,
+                                "resolution": 1,
+                                "offset": 0,
+                                "unit": "",
+                                "states": {
+                                    "1": "Neutral",
+                                    "4": "Forward",
+                                    "16": "Reverse",
+                                },
+                            }
+                        },
+                    }
+                },
+            },
+        )
+        profiles = discover_profiles(tmp_path)
+        pgn_db, spn_db, _ = parse_j1939_profile(profiles["gearbox.json"])
+        assert 800005 in spn_db
+        assert spn_db[800005].states == {1: "Neutral", 4: "Forward", 16: "Reverse"}
+
+    def test_man_profile_gearbox_spn(self):
+        """Real MAN profile includes gearbox SPN 800005 with states."""
+        repo_root = Path(__file__).resolve().parents[1]
+        profile_path = (
+            repo_root / "custom_components" / "senquip" / "can_profiles" / "man_d2862.json"
+        )
+        profiles = discover_profiles(profile_path.parent)
+        _, spn_db, _ = parse_j1939_profile(profiles["man_d2862.json"])
+        assert 800005 in spn_db
+        assert spn_db[800005].states is not None
+        assert spn_db[800005].states[4] == "Forward"
+
     def test_cross_reference_validation_raises(self, tmp_path: Path):
         _write_json(
             tmp_path / "bad.json",

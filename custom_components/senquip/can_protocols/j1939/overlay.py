@@ -103,6 +103,19 @@ def _validate_spn_data(
                 raise ValueError("SPN 'min_value' must be a number")
             if max_value is not None and not isinstance(max_value, (int, float)):
                 raise ValueError("SPN 'max_value' must be a number")
+            states: dict[int, str] | None = None
+            states_raw = spn_obj.get("states")
+            if states_raw is not None:
+                if not isinstance(states_raw, dict):
+                    raise ValueError("SPN 'states' must be an object")
+                states = {}
+                for raw_key, label in states_raw.items():
+                    try:
+                        states[int(raw_key)] = str(label)
+                    except (TypeError, ValueError) as conv_err:
+                        raise ValueError(
+                            f"SPN 'states' keys must be integers and values must be strings: {conv_err}"
+                        ) from conv_err
             parsed[spn_num] = SPNDefinition(
                 spn=spn_num,
                 name=spn_obj["name"],
@@ -115,6 +128,7 @@ def _validate_spn_data(
                 unit=spn_obj["unit"],
                 min_value=min_value,
                 max_value=max_value,
+                states=states,
             )
         except (KeyError, TypeError, ValueError) as err:
             raise ValueError(

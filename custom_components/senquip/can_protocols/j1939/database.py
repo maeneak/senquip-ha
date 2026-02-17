@@ -25,6 +25,7 @@ class SPNDefinition:
     unit: str
     min_value: float | None = None
     max_value: float | None = None
+    states: dict[int, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)

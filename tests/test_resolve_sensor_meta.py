@@ -1,15 +1,18 @@
 """Tests for sensor metadata resolution with canonical keys."""
 
+from pathlib import Path
+
+from custom_components.senquip.can_profiles.loader import discover_profiles
 from custom_components.senquip.can_protocols.j1939.protocol import J1939CANProtocol
-from custom_components.senquip.const import EntityCategory
+from custom_components.senquip.const import EntityCategory, SensorDeviceClass
 from custom_components.senquip.sensor import _resolve_sensor_meta
 
 
 class _CoordinatorStub:
-    def __init__(self):
+    def __init__(self, profiles=None):
         protocol = J1939CANProtocol()
-        decoder, _errors = protocol.build_decoder([])
-        self._can_runtime = {"can1": (protocol, decoder)}
+        decoder, _errors = protocol.build_decoder(profiles or [])
+        self._can_runtime = {"can1": (protocol, decoder), "can2": (protocol, decoder)}
 
 
 class TestResolveInternal:
@@ -36,6 +39,26 @@ class TestResolveCAN:
     def test_dm1_field(self):
         meta = _resolve_sensor_meta("can.can1.j1939.dm1.active_fault", _CoordinatorStub())
         assert "DM1 Active Fault" in meta.name
+
+
+class TestResolveStateMappedSPN:
+    def test_gearbox_status_enum(self):
+        """State-mapped SPN resolves as ENUM sensor with options."""
+        repo_root = Path(__file__).resolve().parents[1]
+        profile_dir = repo_root / "custom_components" / "senquip" / "can_profiles"
+        profiles = discover_profiles(profile_dir)
+        man_profile = profiles["man_d2862.json"]
+        coord = _CoordinatorStub(profiles=[man_profile])
+
+        meta = _resolve_sensor_meta("can.can2.j1939.spn800005", coord)
+        assert "Gearbox Status" in meta.name
+        assert meta.device_class == SensorDeviceClass.ENUM
+        assert meta.state_class is None
+        assert meta.unit is None
+        assert meta.options is not None
+        assert "Forward" in meta.options
+        assert "Neutral" in meta.options
+        assert "Reverse" in meta.options
 
 
 class TestResolveEvent:

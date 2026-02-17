@@ -21,13 +21,15 @@ from homeassistant.const import (
 )
 
 DOMAIN = "senquip"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 CONF_MQTT_TOPIC = "mqtt_topic"
 CONF_DEVICE_ID = "device_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_SELECTED_SIGNALS = "selected_signals"
 CONF_PORT_CONFIGS = "port_configs"
+
+DEVICE_TIMEOUT = 30
 
 DISCOVERY_TIMEOUT = 60
 
@@ -143,6 +145,7 @@ class SensorMeta:
     unit: str | None = None
     entity_category: EntityCategory | None = None
     icon: str | None = None
+    options: list[str] | None = None
 
 
 KNOWN_INTERNAL_SENSORS: dict[str, SensorMeta] = {

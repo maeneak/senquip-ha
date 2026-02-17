@@ -350,3 +350,54 @@ class TestCustomDatabases:
         decoder = J1939Decoder(pgn_database=PGN_DATABASE, spn_database=custom_spn)
         results = decoder.decode_frame(0x18FEEE00, "A0FFFFB3FFFF9CFA")
         assert results[110] == 280.0
+
+
+# ---------------------------------------------------------------------------
+# State-mapped SPN decoding
+# ---------------------------------------------------------------------------
+
+class TestStateMappedSPN:
+    """Test decode_spn with a states mapping (e.g. gearbox status)."""
+
+    GEARBOX_SPN = SPNDefinition(
+        spn=800005,
+        name="Gearbox Status",
+        pgn=65308,
+        start_byte=1,
+        start_bit=1,
+        bit_length=6,
+        resolution=1,
+        offset=0,
+        unit="",
+        states={1: "Neutral", 4: "Forward", 16: "Reverse"},
+    )
+
+    def test_forward(self):
+        # Byte 1 = 0xC4: bits 7-8=11 (unused), bits 5-6=00, bits 3-4=01 (forward), bits 1-2=00
+        data = bytes([0xC4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
+        assert result == "Forward"
+
+    def test_neutral(self):
+        # Byte 1 = 0xC1: bits 7-8=11, bits 5-6=00, bits 3-4=00, bits 1-2=01 (neutral)
+        data = bytes([0xC1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
+        assert result == "Neutral"
+
+    def test_reverse(self):
+        # Byte 1 = 0xD0: bits 7-8=11, bits 5-6=01 (reverse), bits 3-4=00, bits 1-2=00
+        data = bytes([0xD0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
+        assert result == "Reverse"
+
+    def test_not_available(self):
+        # All 6 bits set = 0x3F → not available
+        data = bytes([0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
+        assert result is None
+
+    def test_unmapped_value_returns_none(self):
+        # Raw value 0 (all bits clear) has no state mapping
+        data = bytes([0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
+        assert result is None

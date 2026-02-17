@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...const import SPN_UNIT_TO_HA, EntityCategory, SensorMeta, SensorStateClass
+from ...const import SPN_UNIT_TO_HA, EntityCategory, SensorDeviceClass, SensorMeta, SensorStateClass
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
@@ -244,6 +244,15 @@ class J1939CANProtocol:
                 return SensorMeta(name=f"SPN {spn_num}")
             pgn_def = decoder._pgn_db.get(spn_def.pgn)
             acronym = pgn_def.acronym if pgn_def else ""
+            name = spn_def.name if not acronym else f"{spn_def.name} ({acronym})"
+            if spn_def.states is not None:
+                return SensorMeta(
+                    name=name,
+                    device_class=SensorDeviceClass.ENUM,
+                    state_class=None,
+                    unit=None,
+                    options=list(spn_def.states.values()),
+                )
             mapping = SPN_UNIT_TO_HA.get(spn_def.unit)
             if mapping:
                 device_class, unit, state_class = mapping
@@ -253,7 +262,6 @@ class J1939CANProtocol:
                     spn_def.unit or None,
                     SensorStateClass.MEASUREMENT,
                 )
-            name = spn_def.name if not acronym else f"{spn_def.name} ({acronym})"
             return SensorMeta(
                 name=name,
                 device_class=device_class,

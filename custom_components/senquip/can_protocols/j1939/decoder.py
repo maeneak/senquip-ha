@@ -100,11 +100,14 @@ class J1939Decoder:
         return priority, pgn, source
 
     @staticmethod
-    def decode_spn(spn_def: SPNDefinition, data_bytes: bytes) -> float | None:
+    def decode_spn(spn_def: SPNDefinition, data_bytes: bytes) -> float | str | None:
         """Decode a single SPN value from CAN data bytes.
 
         Returns None if the value indicates 'not available' (all bits = 1)
         or 'error indicator' (all bits = 1 except LSB = 0).
+        For SPNs with a ``states`` mapping, returns the matching state string
+        instead of a numeric physical value (or None if the raw value has no
+        matching state).
         """
         start_idx = spn_def.start_byte - 1  # Convert to 0-indexed
         byte_count = (spn_def.bit_length + 7) // 8
@@ -132,6 +135,10 @@ class J1939Decoder:
         error_indicator = not_available - 1
         if raw_value == error_indicator:
             return None
+
+        # State-mapped SPNs return a human-readable string
+        if spn_def.states is not None:
+            return spn_def.states.get(raw_value)
 
         # Apply resolution and offset
         physical_value = (raw_value * spn_def.resolution) + spn_def.offset
@@ -257,7 +264,7 @@ class J1939Decoder:
         """Look up SPN definition by number."""
         return self._spn_db.get(spn_num)
 
-    def decode_frame(self, can_id: int, hex_data: str) -> dict[int, float | None]:
+    def decode_frame(self, can_id: int, hex_data: str) -> dict[int, float | str | None]:
         """Decode all known SPNs from a single CAN frame.
 
         Args:
@@ -285,7 +292,7 @@ class J1939Decoder:
             _LOGGER.warning("Invalid hex data for CAN ID %d: %s", can_id, hex_data)
             return {}
 
-        results: dict[int, float | None] = {}
+        results: dict[int, float | str | None] = {}
         for spn_num in pgn_def.spns:
             spn_def = self._spn_db.get(spn_num)
             if spn_def is None:
@@ -297,7 +304,7 @@ class J1939Decoder:
 
     def decode_can_port(
         self, frames: list[dict], port: str = ""
-    ) -> tuple[dict[int, float | None], DM1Result | None]:
+    ) -> tuple[dict[int, float | str | None], DM1Result | None]:
         """Decode all frames from a CAN port.
 
         Args:
@@ -309,7 +316,7 @@ class J1939Decoder:
             spn_values: Dict mapping SPN number to decoded value.
             dm1_result: Decoded DM1 if a DM1 frame was found, else None.
         """
-        all_spns: dict[int, float | None] = {}
+        all_spns: dict[int, float | str | None] = {}
         dm1_result: DM1Result | None = None
 
         for frame in frames:

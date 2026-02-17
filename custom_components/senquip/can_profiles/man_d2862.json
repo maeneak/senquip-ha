@@ -41,6 +41,7 @@
           "acronym": "MAN_AUX",
           "length": 8,
           "spns": [
+            800005,
             800001,
             800002,
             800003,
@@ -168,6 +169,21 @@
           "unit": "year",
           "min_value": 1985,
           "max_value": 2235
+        },
+        "800005": {
+          "name": "Gearbox Status",
+          "pgn": 65308,
+          "start_byte": 1,
+          "start_bit": 1,
+          "bit_length": 6,
+          "resolution": 1,
+          "offset": 0,
+          "unit": "",
+          "states": {
+            "1": "Neutral",
+            "4": "Forward",
+            "16": "Reverse"
+          }
         },
         "800001": {
           "name": "Current Max Permissible Load",
