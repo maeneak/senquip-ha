@@ -32,20 +32,22 @@ class TestRuntimeDecode:
     def test_known_spn_values(self):
         protocol, decoder = _build_decoder()
         selected = {"can.can2.j1939.spn190", "can.can2.j1939.spn247"}
-        values, _ = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
+        values, _, _ = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
         assert values["can.can2.j1939.spn190"] == 1841.0
         assert values["can.can2.j1939.spn247"] == 503.95
 
     def test_unknown_pgn_raw_value(self):
         protocol, decoder = _build_decoder()
         selected = {"can.can2.j1939.raw.65308"}
-        values, _ = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
+        values, _, _ = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
         assert values["can.can2.j1939.raw.65308"] == "C4F0FFFF00FF00FF"
 
     def test_man_profile_decodes_proprietary_spn(self):
         protocol, decoder = _build_decoder(with_man_profile=True)
         selected = {"can.can2.j1939.spn800001"}
-        values, diagnostics = protocol.decode_runtime(EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder)
+        values, diagnostics, _ = protocol.decode_runtime(
+            EXAMPLE_PAYLOAD["can2"], "can2", selected, decoder
+        )
         assert "can.can2.j1939.spn800001" not in values
         assert any("800001" in frame.get("spns", {}) for frame in diagnostics)
 
@@ -53,7 +55,7 @@ class TestRuntimeDecode:
         protocol, decoder = _build_decoder(with_man_profile=True)
         frames = [{"id": 419351040, "data": "44FFFE00C201FFFF"}]
         selected = {"can.can2.j1939.dm1.active_fault", "can.can2.j1939.dm1.active_spn"}
-        values, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
+        values, _, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
         assert "can.can2.j1939.dm1.active_fault" in values
         assert "can.can2.j1939.dm1.active_spn" in values
 
@@ -61,7 +63,7 @@ class TestRuntimeDecode:
         protocol, decoder = _build_decoder()
         frames = [{"id": 0x18FEEE00, "data": "FFFFFFFFFFFFFFFF"}]
         selected = {"can.can2.j1939.spn110"}
-        values, diagnostics = protocol.decode_runtime(frames, "can2", selected, decoder)
+        values, diagnostics, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
 
         assert "can.can2.j1939.spn110" not in values
         assert diagnostics[0]["spns"]["110"]["value"] is None

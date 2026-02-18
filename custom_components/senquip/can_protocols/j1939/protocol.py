@@ -12,6 +12,43 @@ from .decoder import DM1_PGN, J1939Decoder
 from .overlay import merge_j1939_databases
 
 
+_DM1_META: dict[str, SensorMeta] = {
+    "active_fault": SensorMeta(
+        name="DM1 Active Fault", state_class=None, icon="mdi:engine",
+    ),
+    "protect_lamp": SensorMeta(
+        name="DM1 Protect Lamp", state_class=None, icon="mdi:alert-circle",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "amber_warning": SensorMeta(
+        name="DM1 Amber Warning", state_class=None, icon="mdi:alert",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "red_stop": SensorMeta(
+        name="DM1 Red Stop", state_class=None, icon="mdi:alert-octagon",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "mil": SensorMeta(
+        name="DM1 MIL Lamp", state_class=None, icon="mdi:engine-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "active_spn": SensorMeta(
+        name="DM1 Active SPN", state_class=None, icon="mdi:identifier",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "active_fmi": SensorMeta(
+        name="DM1 Active FMI", state_class=None, icon="mdi:identifier",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    "occurrence_count": SensorMeta(
+        name="DM1 Occurrence Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:counter",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+}
+
+
 class J1939CANProtocol:
     """Protocol adapter implementing J1939 decoding/discovery."""
 
@@ -146,9 +183,10 @@ class J1939CANProtocol:
         port_id: str,
         selected_signals: set[str],
         decoder: J1939Decoder,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
         values: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
+        has_valid_data = False
 
         for frame in frames:
             can_id = frame.get("id")
@@ -179,6 +217,7 @@ class J1939CANProtocol:
                 big_endian = decoder.is_dm1_big_endian(port_id)
                 dm1 = decoder.decode_dm1(dm1_bytes, big_endian_spn=big_endian)
                 if dm1 is not None:
+                    has_valid_data = True
                     custom_faults = decoder.get_dm1_custom_fault_spns()
                     fault_desc = decoder.get_fault_description(
                         dm1.active_spn,
@@ -216,6 +255,8 @@ class J1939CANProtocol:
                 frame_diag["pgn_acronym"] = pgn_def.acronym
                 spns: dict[str, Any] = {}
                 for spn_num, spn_value in decoded.items():
+                    if spn_value is not None:
+                        has_valid_data = True
                     spn_def = decoder.get_spn_def(spn_num)
                     spn_entry: dict[str, Any] = {"value": spn_value}
                     if spn_def is not None:
@@ -234,7 +275,7 @@ class J1939CANProtocol:
                     values[raw_key] = hex_data
             diagnostics.append(frame_diag)
 
-        return values, diagnostics
+        return values, diagnostics, has_valid_data
 
     def resolve_signal_meta(self, signal_key: str, decoder: J1939Decoder) -> SensorMeta:
         if ".spn" in signal_key:
@@ -275,42 +316,7 @@ class J1939CANProtocol:
 
         if ".dm1." in signal_key:
             field = signal_key.rsplit(".dm1.", 1)[1]
-            dm1_meta: dict[str, SensorMeta] = {
-                "active_fault": SensorMeta(
-                    name="DM1 Active Fault", state_class=None, icon="mdi:engine",
-                ),
-                "protect_lamp": SensorMeta(
-                    name="DM1 Protect Lamp", state_class=None, icon="mdi:alert-circle",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "amber_warning": SensorMeta(
-                    name="DM1 Amber Warning", state_class=None, icon="mdi:alert",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "red_stop": SensorMeta(
-                    name="DM1 Red Stop", state_class=None, icon="mdi:alert-octagon",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "mil": SensorMeta(
-                    name="DM1 MIL Lamp", state_class=None, icon="mdi:engine-outline",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "active_spn": SensorMeta(
-                    name="DM1 Active SPN", state_class=None, icon="mdi:identifier",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "active_fmi": SensorMeta(
-                    name="DM1 Active FMI", state_class=None, icon="mdi:identifier",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-                "occurrence_count": SensorMeta(
-                    name="DM1 Occurrence Count",
-                    state_class=SensorStateClass.MEASUREMENT,
-                    icon="mdi:counter",
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                ),
-            }
-            return dm1_meta.get(
+            return _DM1_META.get(
                 field,
                 SensorMeta(
                     name=f"DM1 {field}", state_class=None,

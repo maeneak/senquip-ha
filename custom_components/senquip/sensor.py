@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import SenquipDataCoordinator
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -26,7 +29,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-def _resolve_sensor_meta(sensor_key: str, coordinator: Any) -> SensorMeta:
+def _resolve_sensor_meta(sensor_key: str, coordinator: SenquipDataCoordinator) -> SensorMeta:
     """Determine HA sensor attributes from a canonical signal key."""
     if sensor_key.startswith("internal.main."):
         json_key = sensor_key.removeprefix("internal.main.")
@@ -142,7 +145,7 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: Any,
+        coordinator: SenquipDataCoordinator,
         sensor_key: str,
         sensor_meta: SensorMeta,
         device_id: str,

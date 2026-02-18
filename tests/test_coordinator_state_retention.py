@@ -150,6 +150,16 @@ class _ToggleProtocolStub:
         return SensorMeta(name="Engine Speed")
 
 
+class _AvailableWithoutSelectedSignalsProtocolStub:
+    """Stub that reports valid runtime data even when no CAN values are selected."""
+
+    def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
+        return {}, [], True
+
+    def resolve_signal_meta(self, _signal_key, _decoder):
+        return SensorMeta(name="Engine Speed")
+
+
 def test_small_total_increasing_regression_is_ignored_for_can_counter():
     coordinator = _build_coordinator(["can.can1.j1939.spn247"])
     coordinator._can_runtime = {"can1": (_ProtocolStub(), None)}
@@ -268,4 +278,17 @@ def test_internal_sensors_unaffected_by_can_port_availability():
     )
 
     assert coordinator.is_can_port_available("can1") is False
+    assert coordinator.data["internal.main.vin"] == 28.0
+
+
+def test_can_port_availability_not_tied_to_selected_can_entities():
+    """Port can be available even if no CAN entities are selected."""
+    coordinator = _build_coordinator(["internal.main.vin"])
+    coordinator._can_runtime = {"can1": (_AvailableWithoutSelectedSignalsProtocolStub(), None)}
+
+    coordinator._handle_message(
+        _message({"deviceid": "DEV1", "vin": 28.0, "can1": [{"id": 1, "data": "00"}]})
+    )
+
+    assert coordinator.is_can_port_available("can1") is True
     assert coordinator.data["internal.main.vin"] == 28.0

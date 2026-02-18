@@ -13,6 +13,7 @@ from .const import (
     CONF_MQTT_TOPIC,
     CONF_PORT_CONFIGS,
     CONF_SELECTED_SIGNALS,
+    DIAGNOSTICS_MAX_FRAMES,
     DOMAIN,
 )
 
@@ -27,9 +28,10 @@ async def async_get_config_entry_diagnostics(
 
     for port, port_data in can_diag.items():
         protocol = port_data.get("protocol")
-        frames = port_data.get("frames", [])
-        known_frames = [frame for frame in frames if frame.get("known")]
-        unknown_frames = [frame for frame in frames if not frame.get("known")]
+        all_frames = port_data.get("frames", [])
+        frames = all_frames[-DIAGNOSTICS_MAX_FRAMES:]
+        known_frames = [frame for frame in all_frames if frame.get("known")]
+        unknown_frames = [frame for frame in all_frames if not frame.get("known")]
 
         null_spns: list[dict[str, Any]] = []
         for frame in known_frames:
@@ -46,7 +48,7 @@ async def async_get_config_entry_diagnostics(
 
         can_summary[port] = {
             "protocol": protocol,
-            "total_frames": len(frames),
+            "total_frames": len(all_frames),
             "known_frames": len(known_frames),
             "unknown_frames": len(unknown_frames),
             "frames": frames,

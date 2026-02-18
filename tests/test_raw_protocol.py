@@ -23,7 +23,7 @@ def test_raw_protocol_runtime_decode():
     protocol = get_can_protocol("canopen")
     assert protocol is not None
     selected = {"can.can2.canopen.raw.61444"}
-    values, diagnostics = protocol.decode_runtime(
+    values, diagnostics, has_valid_data = protocol.decode_runtime(
         [{"id": 217056256, "data": "3FFFCD883927F4FF"}],
         "can2",
         selected,
@@ -31,4 +31,5 @@ def test_raw_protocol_runtime_decode():
     )
     assert values["can.can2.canopen.raw.61444"] == "3FFFCD883927F4FF"
     assert diagnostics[0]["mode"] == "raw"
+    assert has_valid_data is True
 
