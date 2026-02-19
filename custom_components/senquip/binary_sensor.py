@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import SenquipDataCoordinator
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -68,7 +71,7 @@ class SenquipDeviceConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
 
     def __init__(
         self,
-        coordinator: Any,
+        coordinator: SenquipDataCoordinator,
         device_id: str,
         device_name: str,
     ) -> None:
@@ -97,7 +100,7 @@ class SenquipCANPortConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
 
     def __init__(
         self,
-        coordinator: Any,
+        coordinator: SenquipDataCoordinator,
         device_id: str,
         device_name: str,
         port_id: str,

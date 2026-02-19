@@ -231,6 +231,11 @@ def merge_j1939_databases(
             merged_pgn.update(custom_pgn)
             merged_spn.update(custom_spn)
             if profile_dm1 is not None:
+                if dm1_config is not None:
+                    _LOGGER.warning(
+                        "Profile %s overrides DM1 config from a previous profile",
+                        profile.filename,
+                    )
                 dm1_config = profile_dm1
             _LOGGER.debug("Loaded J1939 profile: %s", profile.filename)
         except ValueError as err:

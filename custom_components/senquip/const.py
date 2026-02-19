@@ -33,6 +33,13 @@ DEVICE_TIMEOUT = 30
 
 DISCOVERY_TIMEOUT = 60
 
+# Fraction threshold below which a TOTAL_INCREASING sensor drop is treated as
+# a legitimate meter reset rather than a noisy regression (mirrors HA behaviour).
+TOTAL_INCREASING_REGRESSION_TOLERANCE = 0.9
+
+# Maximum number of CAN frames included per port in diagnostics output.
+DIAGNOSTICS_MAX_FRAMES = 50
+
 CAN_PROFILE_DIR = "can_profiles"
 CAN_PROTOCOL_J1939 = "j1939"
 

@@ -71,11 +71,12 @@ class RawCANProtocol:
         port_id: str,
         selected_signals: set[str],
         decoder: Any,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
         """Emit selected raw frame payloads and basic diagnostics."""
         del decoder
         values: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
+        has_valid_data = False
 
         for frame in frames:
             can_id = frame.get("id")
@@ -87,6 +88,7 @@ class RawCANProtocol:
             signal_key = f"can.{port_id}.{self.protocol_id}.raw.{pgn}"
             if signal_key in selected_signals:
                 values[signal_key] = hex_data
+            has_valid_data = True
 
             diagnostics.append(
                 {
@@ -103,7 +105,7 @@ class RawCANProtocol:
                 }
             )
 
-        return values, diagnostics
+        return values, diagnostics, has_valid_data
 
     def resolve_signal_meta(self, signal_key: str, decoder: Any) -> SensorMeta:
         """Resolve metadata for raw-only protocol signal keys."""

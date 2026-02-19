@@ -41,8 +41,8 @@ class CANProtocol(Protocol):
         port_id: str,
         selected_signals: set[str],
         decoder: Any,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Decode runtime values and diagnostics for one port."""
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+        """Decode runtime values, diagnostics, and port availability for one port."""
 
     def resolve_signal_meta(self, signal_key: str, decoder: Any) -> Any:
         """Resolve protocol-specific metadata for a signal key."""

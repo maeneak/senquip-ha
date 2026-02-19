@@ -27,6 +27,7 @@ from .const import (
     DOMAIN,
     KNOWN_INTERNAL_SENSORS,
     PLATFORMS,
+    TOTAL_INCREASING_REGRESSION_TOLERANCE,
     SensorStateClass,
     deserialize_port_configs,
 )
@@ -247,8 +248,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current >= previous:
             return False
 
-        # Mirror HA meter-cycle tolerance: treat small drops (<10%) as noisy regressions.
-        if previous > 0 and current > previous * 0.9:
+        # Mirror HA meter-cycle tolerance: treat small drops as noisy regressions.
+        if previous > 0 and current > previous * TOTAL_INCREASING_REGRESSION_TOLERANCE:
             _LOGGER.debug(
                 "Ignoring small regression for total_increasing sensor %s: %s -> %s",
                 signal_key,
@@ -291,14 +292,19 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if runtime is None:
                     continue
                 protocol, decoder = runtime
-                port_values, port_diag = protocol.decode_runtime(
+                runtime_result = protocol.decode_runtime(
                     value,
                     key,
                     self._selected,
                     decoder,
                 )
+                if len(runtime_result) == 3:
+                    port_values, port_diag, port_has_valid_data = runtime_result
+                else:
+                    port_values, port_diag = runtime_result
+                    port_has_valid_data = bool(port_values)
                 data.update(port_values)
-                self._can_port_available[key] = bool(port_values)
+                self._can_port_available[key] = port_has_valid_data
                 if port_diag:
                     diag[key] = {
                         "protocol": protocol.protocol_id,
