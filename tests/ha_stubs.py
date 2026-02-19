@@ -57,6 +57,7 @@ class SensorEntity:
 
 class BinarySensorDeviceClass(str, enum.Enum):
     CONNECTIVITY = "connectivity"
+    RUNNING = "running"
     BATTERY = "battery"
     MOTION = "motion"
 

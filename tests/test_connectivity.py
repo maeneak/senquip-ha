@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from custom_components.senquip.binary_sensor import (
+    SenquipCANDeviceActiveSensor,
     SenquipCANPortConnectivitySensor,
     SenquipDeviceConnectivitySensor,
 )
@@ -83,6 +84,50 @@ class TestCANPortConnectivity:
         coord = _FakeCoordinator()
         sensor = SenquipCANPortConnectivitySensor(coord, "dev1", "My Senquip", "can2")
         assert sensor._attr_unique_id == "dev1_can2_connectivity"
+
+
+# ---------------------------------------------------------------------------
+# CAN device active sensor
+# ---------------------------------------------------------------------------
+
+
+class TestCANDeviceActive:
+    def test_off_when_device_offline(self):
+        coord = _FakeCoordinator()
+        coord._device_online = False
+        coord._can_port_available["can1"] = True
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can1")
+        assert sensor.is_on is False
+
+    def test_off_when_port_has_no_data(self):
+        coord = _FakeCoordinator()
+        coord._device_online = True
+        coord._can_port_available["can1"] = False
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can1")
+        assert sensor.is_on is False
+
+    def test_on_when_device_online_and_port_active(self):
+        coord = _FakeCoordinator()
+        coord._device_online = True
+        coord._can_port_available["can1"] = True
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can1")
+        assert sensor.is_on is True
+
+    def test_unique_id(self):
+        coord = _FakeCoordinator()
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can2")
+        assert sensor._attr_unique_id == "dev1_can2_device_active"
+
+    def test_name(self):
+        coord = _FakeCoordinator()
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can1")
+        assert sensor._attr_name == "Device Active"
+
+    def test_no_entity_category(self):
+        """Device active sensor should NOT be diagnostic — visible in dashboards."""
+        coord = _FakeCoordinator()
+        sensor = SenquipCANDeviceActiveSensor(coord, "dev1", "My Senquip", "can1")
+        assert not hasattr(sensor, "_attr_entity_category") or sensor._attr_entity_category is None
 
 
 # ---------------------------------------------------------------------------

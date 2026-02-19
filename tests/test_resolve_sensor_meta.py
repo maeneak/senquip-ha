@@ -4,7 +4,7 @@ from pathlib import Path
 
 from custom_components.senquip.can_profiles.loader import discover_profiles
 from custom_components.senquip.can_protocols.j1939.protocol import J1939CANProtocol
-from custom_components.senquip.const import EntityCategory, SensorDeviceClass
+from custom_components.senquip.const import EntityCategory, SensorDeviceClass, SensorStateClass
 from custom_components.senquip.sensor import _resolve_sensor_meta
 
 
@@ -59,6 +59,30 @@ class TestResolveStateMappedSPN:
         assert "Forward" in meta.options
         assert "Neutral" in meta.options
         assert "Reverse" in meta.options
+
+
+class TestSPNStateClassOverrides:
+    def test_trip_fuel_is_measurement(self):
+        """SPN 182 (Engine Trip Fuel) should be MEASUREMENT, not TOTAL_INCREASING."""
+        meta = _resolve_sensor_meta("can.can1.j1939.spn182", _CoordinatorStub())
+        assert "Trip Fuel" in meta.name
+        assert meta.state_class == SensorStateClass.MEASUREMENT
+
+    def test_time_date_hours_is_measurement(self):
+        """SPN 961 (Hours in Time/Date) should be MEASUREMENT, not TOTAL_INCREASING."""
+        meta = _resolve_sensor_meta("can.can1.j1939.spn961", _CoordinatorStub())
+        assert meta.state_class == SensorStateClass.MEASUREMENT
+
+    def test_total_fuel_remains_total_increasing(self):
+        """SPN 250 (Engine Total Fuel Used) should keep TOTAL_INCREASING."""
+        meta = _resolve_sensor_meta("can.can1.j1939.spn250", _CoordinatorStub())
+        assert "Total Fuel" in meta.name
+        assert meta.state_class == SensorStateClass.TOTAL_INCREASING
+
+    def test_total_hours_remains_total_increasing(self):
+        """SPN 247 (Engine Total Hours) should keep TOTAL_INCREASING."""
+        meta = _resolve_sensor_meta("can.can1.j1939.spn247", _CoordinatorStub())
+        assert meta.state_class == SensorStateClass.TOTAL_INCREASING
 
 
 class TestResolveEvent:

@@ -50,6 +50,11 @@ async def async_setup_entry(
                     coordinator, device_id, device_name, port_id
                 )
             )
+            entities.append(
+                SenquipCANDeviceActiveSensor(
+                    coordinator, device_id, device_name, port_id
+                )
+            )
 
     async_add_entities(entities)
 
@@ -112,6 +117,45 @@ class SenquipCANPortConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         """Return True if the device is online and the CAN port has data."""
+        return (
+            self.coordinator.is_device_online()
+            and self.coordinator.is_can_port_available(self._port_id)
+        )
+
+
+class SenquipCANDeviceActiveSensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor showing whether a CAN-connected device is active.
+
+    Unlike the connectivity sensor (diagnostic), this has no entity_category
+    so it appears in dashboards by default — useful for overlaying operating
+    windows on history graphs.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+
+    def __init__(
+        self,
+        coordinator: Any,
+        device_id: str,
+        device_name: str,
+        port_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._port_id = port_id
+        self._attr_unique_id = f"{device_id}_{port_id}_device_active"
+        self._attr_name = "Device Active"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{device_id}_{port_id}")},
+            name=device_name,
+            model=PORT_DISPLAY_NAMES.get(port_id, port_id),
+            manufacturer="Senquip",
+            via_device=(DOMAIN, device_id),
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if the CAN-connected device is actively transmitting."""
         return (
             self.coordinator.is_device_online()
             and self.coordinator.is_can_port_available(self._port_id)

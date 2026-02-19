@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...const import SPN_UNIT_TO_HA, EntityCategory, SensorDeviceClass, SensorMeta, SensorStateClass
+from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, SensorDeviceClass, SensorMeta, SensorStateClass
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
@@ -262,6 +262,7 @@ class J1939CANProtocol:
                     spn_def.unit or None,
                     SensorStateClass.MEASUREMENT,
                 )
+            state_class = SPN_STATE_CLASS_OVERRIDES.get(spn_num, state_class)
             return SensorMeta(
                 name=name,
                 device_class=device_class,

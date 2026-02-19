@@ -320,6 +320,11 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if signal_key in self._selected:
                     data[signal_key] = value
 
+        # Mark configured CAN ports as unavailable when absent from payload
+        for port_id in self._can_runtime:
+            if port_id not in payload:
+                self._can_port_available[port_id] = False
+
         self.diagnostics = diag
         return data
 

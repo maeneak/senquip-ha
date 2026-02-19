@@ -1,6 +1,7 @@
 """Tests for protocol runtime decoding and canonical key extraction."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from custom_components.senquip.can_profiles.loader import discover_profiles
 from custom_components.senquip.can_protocols.j1939.protocol import J1939CANProtocol
@@ -56,6 +57,43 @@ class TestRuntimeDecode:
         values, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
         assert "can.can2.j1939.dm1.active_fault" in values
         assert "can.can2.j1939.dm1.active_spn" in values
+
+    def test_absent_can_port_marked_unavailable(self):
+        """When MQTT payload omits a CAN key, that port becomes unavailable."""
+        from custom_components.senquip import SenquipDataCoordinator
+        from tests.ha_stubs import ConfigEntry
+
+        entry = ConfigEntry(
+            data={
+                "device_id": "test_dev",
+                "mqtt_topic": "senquip/test",
+                "selected_signals": ["can.can2.j1939.spn190"],
+                "port_configs": {
+                    "can2": {
+                        "family": "can",
+                        "active": True,
+                        "protocol": "j1939",
+                        "profiles": [],
+                    },
+                },
+            }
+        )
+        hass = MagicMock()
+        coord = SenquipDataCoordinator(hass, entry, {})
+
+        # First message WITH can2 data — port should be available
+        payload_with_can = {
+            "deviceid": "test_dev",
+            "vsys": 12.5,
+            "can2": [{"id": 217056256, "data": "3FFFCD883927F4FF"}],
+        }
+        coord._parse_payload(payload_with_can)
+        assert coord._can_port_available.get("can2") is True
+
+        # Second message WITHOUT can2 key — port should become unavailable
+        payload_without_can = {"deviceid": "test_dev", "vsys": 12.5}
+        coord._parse_payload(payload_without_can)
+        assert coord._can_port_available.get("can2") is False
 
     def test_unavailable_spn_not_emitted_in_runtime_values(self):
         protocol, decoder = _build_decoder()
