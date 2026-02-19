@@ -14,6 +14,9 @@ class _CoordinatorStub:
         decoder, _errors = protocol.build_decoder(profiles or [])
         self._can_runtime = {"can1": (protocol, decoder), "can2": (protocol, decoder)}
 
+    def get_can_runtime(self, port_id):
+        return self._can_runtime.get(port_id)
+
 
 class TestResolveInternal:
     def test_known_internal(self):

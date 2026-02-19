@@ -139,7 +139,7 @@ class SenquipCANDeviceActiveSensor(CoordinatorEntity, BinarySensorEntity):
 
     def __init__(
         self,
-        coordinator: Any,
+        coordinator: SenquipDataCoordinator,
         device_id: str,
         device_name: str,
         port_id: str,

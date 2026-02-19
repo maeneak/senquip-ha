@@ -292,17 +292,12 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if runtime is None:
                     continue
                 protocol, decoder = runtime
-                runtime_result = protocol.decode_runtime(
+                port_values, port_diag, port_has_valid_data = protocol.decode_runtime(
                     value,
                     key,
                     self._selected,
                     decoder,
                 )
-                if len(runtime_result) == 3:
-                    port_values, port_diag, port_has_valid_data = runtime_result
-                else:
-                    port_values, port_diag = runtime_result
-                    port_has_valid_data = bool(port_values)
                 data.update(port_values)
                 self._can_port_available[key] = port_has_valid_data
                 if port_diag:

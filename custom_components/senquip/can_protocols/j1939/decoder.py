@@ -260,6 +260,10 @@ class J1939Decoder:
         _, pgn, _ = self.extract_pgn(can_id)
         return self._pgn_db.get(pgn)
 
+    def get_pgn_def(self, pgn_num: int) -> PGNDefinition | None:
+        """Look up PGN definition by number."""
+        return self._pgn_db.get(pgn_num)
+
     def get_spn_def(self, spn_num: int) -> SPNDefinition | None:
         """Look up SPN definition by number."""
         return self._spn_db.get(spn_num)

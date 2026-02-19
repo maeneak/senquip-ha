@@ -704,7 +704,13 @@ class SenquipOptionsFlow(config_entries.OptionsFlow):
         if isinstance(raw_payload, list):
             if not raw_payload:
                 raise RuntimeError("Empty array received")
-            device_payload = raw_payload[0]
+            device_payload = None
+            for item in raw_payload:
+                if isinstance(item, dict) and item.get("deviceid") == self._device_id:
+                    device_payload = item
+                    break
+            if device_payload is None:
+                device_payload = raw_payload[0]
         else:
             device_payload = raw_payload
         if not isinstance(device_payload, dict):

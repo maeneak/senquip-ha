@@ -283,7 +283,7 @@ class J1939CANProtocol:
             spn_def = decoder.get_spn_def(spn_num)
             if spn_def is None:
                 return SensorMeta(name=f"SPN {spn_num}")
-            pgn_def = decoder._pgn_db.get(spn_def.pgn)
+            pgn_def = decoder.get_pgn_def(spn_def.pgn)
             acronym = pgn_def.acronym if pgn_def else ""
             name = spn_def.name if not acronym else f"{spn_def.name} ({acronym})"
             if spn_def.states is not None:

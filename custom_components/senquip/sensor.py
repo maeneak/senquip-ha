@@ -50,11 +50,7 @@ def _resolve_sensor_meta(sensor_key: str, coordinator: SenquipDataCoordinator) -
         if len(parts) < 4:
             return SensorMeta(name=sensor_key, state_class=None)
         port_id = parts[1]
-        runtime = None
-        if hasattr(coordinator, "get_can_runtime"):
-            runtime = coordinator.get_can_runtime(port_id)
-        if runtime is None:
-            runtime = getattr(coordinator, "_can_runtime", {}).get(port_id)
+        runtime = coordinator.get_can_runtime(port_id)
         if runtime is None:
             return SensorMeta(name=sensor_key, state_class=None)
         protocol, decoder = runtime
@@ -174,6 +170,8 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return whether the sensor is available."""
+        if not self.coordinator.is_device_online():
+            return False
         if self._sensor_key.startswith("can."):
             parts = self._sensor_key.split(".")
             if len(parts) >= 2:

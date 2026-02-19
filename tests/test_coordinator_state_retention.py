@@ -117,7 +117,7 @@ class _ProtocolStub:
     """Stub that always returns a valid SPN value."""
 
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
-        return {"can.can1.j1939.spn247": 62395000}, []
+        return {"can.can1.j1939.spn247": 62395000}, [], True
 
     def resolve_signal_meta(self, _signal_key, _decoder):
         return SensorMeta(
@@ -131,7 +131,7 @@ class _EmptyProtocolStub:
     """Stub that returns no valid values (simulates device shutdown)."""
 
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
-        return {}, []
+        return {}, [], False
 
     def resolve_signal_meta(self, _signal_key, _decoder):
         return SensorMeta(name="Engine Speed")
@@ -144,7 +144,7 @@ class _ToggleProtocolStub:
         self.values: dict = {}
 
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
-        return dict(self.values), []
+        return dict(self.values), [], bool(self.values)
 
     def resolve_signal_meta(self, _signal_key, _decoder):
         return SensorMeta(name="Engine Speed")
