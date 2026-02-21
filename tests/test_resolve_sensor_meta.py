@@ -65,11 +65,11 @@ class TestResolveStateMappedSPN:
 
 
 class TestSPNStateClassOverrides:
-    def test_trip_fuel_is_measurement(self):
-        """SPN 182 (Engine Trip Fuel) should be MEASUREMENT, not TOTAL_INCREASING."""
+    def test_trip_fuel_is_total(self):
+        """SPN 182 (Engine Trip Fuel) should be TOTAL, not TOTAL_INCREASING (resets each power cycle)."""
         meta = _resolve_sensor_meta("can.can1.j1939.spn182", _CoordinatorStub())
         assert "Trip Fuel" in meta.name
-        assert meta.state_class == SensorStateClass.MEASUREMENT
+        assert meta.state_class == SensorStateClass.TOTAL
 
     def test_time_date_hours_is_measurement(self):
         """SPN 961 (Hours in Time/Date) should be MEASUREMENT, not TOTAL_INCREASING."""

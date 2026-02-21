@@ -251,7 +251,7 @@ KNOWN_INTERNAL_SENSORS: dict[str, SensorMeta] = {
 
 
 SPN_STATE_CLASS_OVERRIDES: dict[int, SensorStateClass] = {
-    182: SensorStateClass.MEASUREMENT,  # Engine Trip Fuel — resets each power cycle
+    182: SensorStateClass.TOTAL,  # Engine Trip Fuel — resets each power cycle
     961: SensorStateClass.MEASUREMENT,  # Hours (Time/Date) — hour-of-day, not cumulative
 }
 

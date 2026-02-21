@@ -249,7 +249,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
 
         # Mirror HA meter-cycle tolerance: treat small drops as noisy regressions.
-        if previous > 0 and current > previous * TOTAL_INCREASING_REGRESSION_TOLERANCE:
+        if previous > 0 and current >= previous * TOTAL_INCREASING_REGRESSION_TOLERANCE:
             _LOGGER.debug(
                 "Ignoring small regression for total_increasing sensor %s: %s -> %s",
                 signal_key,

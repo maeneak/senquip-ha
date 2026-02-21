@@ -104,6 +104,16 @@ def test_small_total_increasing_regression_is_ignored_for_internal_counter():
     assert coordinator.data["internal.main.motion"] == 244.0
 
 
+def test_exact_tolerance_boundary_regression_is_ignored():
+    """A drop of exactly 10% (the tolerance boundary) should be suppressed."""
+    coordinator = _build_coordinator(["internal.main.motion"])
+    coordinator.data = {"internal.main.motion": 240.0}
+
+    coordinator._handle_message(_message({"deviceid": "DEV1", "motion": 216}))
+
+    assert coordinator.data["internal.main.motion"] == 240.0
+
+
 def test_large_total_increasing_drop_is_kept_as_possible_new_cycle():
     coordinator = _build_coordinator(["internal.main.motion"])
     coordinator.data = {"internal.main.motion": 244.0}
