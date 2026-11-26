@@ -223,6 +223,9 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_icon = "mdi:clipboard-text-clock"
+    # The full log is persisted via restore data; recording it on every change
+    # would bloat the database. Count, active_faults and last_fault are recorded.
+    _unrecorded_attributes = frozenset({"faults"})
 
     def __init__(
         self,
@@ -245,6 +248,15 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         last_extra = await self.async_get_last_extra_data()
         if last_extra is not None:
             self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+        # Catch a payload that arrived before this entity was listening
+        self._observe_latest()
+
+    def _observe_latest(self) -> bool:
+        """Feed the latest payload's DM1 frames into the log."""
+        return self._log.observe(
+            self.coordinator.get_dm1_reports(self._port_id),
+            datetime.now(timezone.utc),
+        )
 
     @property
     def extra_restore_state_data(self) -> ExtraStoredData:
@@ -258,12 +270,9 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Feed the latest payload's DM1 frames into the log."""
-        self._log.observe(
-            self.coordinator.get_dm1_reports(self._port_id),
-            datetime.now(timezone.utc),
-        )
-        super()._handle_coordinator_update()
+        """Update the log; write state only when it changed."""
+        if self._observe_latest():
+            self.async_write_ha_state()
 
     @property
     def native_value(self) -> StateType:
@@ -278,6 +287,6 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         return {
             "active_faults": self._log.active_count,
             "last_fault": latest["description"] if latest else None,
-            "last_fault_time": latest["last_active"] if latest else None,
+            "last_fault_time": latest["last_activated"] if latest else None,
             "faults": entries,
         }

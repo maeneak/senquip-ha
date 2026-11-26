@@ -40,10 +40,13 @@ class DM1FaultLog:
 
     @property
     def entries(self) -> list[dict[str, Any]]:
-        """Return log entries, most recently activated first."""
+        """Return log entries, most recently activated first.
+
+        Timestamps keep microseconds so faults from separate payloads never tie.
+        """
         ordered = sorted(
             self._entries.values(),
-            key=lambda entry: entry["last_active"],
+            key=lambda entry: entry["last_activated"],
             reverse=True,
         )
         return [dict(entry, lamps=list(entry["lamps"])) for entry in ordered]
@@ -63,17 +66,24 @@ class DM1FaultLog:
 
         Returns True if the log changed.
         """
-        timestamp = now.isoformat(timespec="seconds")
-        reporting_sources: set[int] = set()
-        current: dict[_FaultKey, Mapping[str, Any]] = {}
+        timestamp = now.isoformat()
 
+        # A single-frame DM1 carries a source's complete active DTC list, so
+        # when one payload holds several frames from a source the last one wins.
+        latest_by_source: dict[int, Mapping[str, Any]] = {}
         for report in reports:
             source = report.get("source_address")
             spn = report.get("active_spn")
             fmi = report.get("active_fmi")
             if not isinstance(source, int) or not isinstance(spn, int) or not isinstance(fmi, int):
                 continue
-            reporting_sources.add(source)
+            latest_by_source[source] = report
+
+        reporting_sources = set(latest_by_source)
+        current: dict[_FaultKey, Mapping[str, Any]] = {}
+        for source, report in latest_by_source.items():
+            spn = report["active_spn"]
+            fmi = report["active_fmi"]
             if spn == 0 and fmi == 0:
                 continue
             current[(source, spn, fmi)] = report
@@ -96,7 +106,7 @@ class DM1FaultLog:
                     "count": 1,
                     "active": True,
                     "first_seen": timestamp,
-                    "last_active": timestamp,
+                    "last_activated": timestamp,
                     "cleared": None,
                 }
                 changed = True
@@ -105,7 +115,7 @@ class DM1FaultLog:
             if not entry["active"]:
                 entry["active"] = True
                 entry["count"] += 1
-                entry["last_active"] = timestamp
+                entry["last_activated"] = timestamp
                 entry["cleared"] = None
                 changed = True
 
@@ -129,13 +139,18 @@ class DM1FaultLog:
         return changed
 
     def _trim(self) -> None:
-        """Drop the oldest inactive entries beyond the size limit."""
+        """Drop the least recently active cleared entries beyond the size limit.
+
+        Active entries are never dropped, so the log can exceed the limit while
+        more than ``max_entries`` faults are active.
+        """
         excess = len(self._entries) - self._max_entries
         if excess <= 0:
             return
+        # Oldest activity first: a cleared fault's last activity is when it cleared
         inactive = sorted(
             (key for key, entry in self._entries.items() if not entry["active"]),
-            key=lambda key: self._entries[key]["last_active"],
+            key=lambda key: self._entries[key]["cleared"] or self._entries[key]["last_activated"],
         )
         for key in inactive[:excess]:
             del self._entries[key]
@@ -172,7 +187,7 @@ class DM1FaultLog:
                     "count": int(raw["count"]),
                     "active": bool(raw["active"]),
                     "first_seen": str(raw["first_seen"]),
-                    "last_active": str(raw["last_active"]),
+                    "last_activated": str(raw["last_activated"]),
                     "cleared": raw.get("cleared"),
                 }
             except (KeyError, TypeError, ValueError):

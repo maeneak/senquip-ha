@@ -20,7 +20,7 @@ The integration subscribes to MQTT telemetry, supports protocol-based CAN decodi
   - `event.main.last`
 - J1939 DM1 fault reporting:
   - Active fault, lamp status (Protect / Amber Warning / Red Stop / MIL) and SPN/FMI sensors
-  - `DM1 Fault History` sensor per J1939 port with DM1 signals selected: persistent log of past faults (SPN, FMI, description, lamps, first seen, last active, cleared, activation count), restored across restarts, capped at 25 entries
+  - `DM1 Fault History` sensor per J1939 port with DM1 signals selected: persistent log of past faults (SPN, FMI, description, lamps, first seen, last activated, cleared, activation count), restored across restarts. Keeps up to 25 entries: the least recently active cleared faults are dropped first and active faults are never dropped
 - Profile overlays for CAN protocols via `custom_components/senquip/can_profiles/`
 - Options flow to rediscover and reconfigure protocols/signals without removing the integration
 - Diagnostics output includes `selected_signals`, `port_configs`, and protocol-specific CAN summaries

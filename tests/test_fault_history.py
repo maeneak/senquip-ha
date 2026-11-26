@@ -56,7 +56,7 @@ class TestDM1FaultLog:
         assert entry["lamps"] == ["Protect"]
         assert entry["active"] is True
         assert entry["count"] == 1
-        assert entry["first_seen"] == entry["last_active"] == "2026-11-27T08:00:00+00:00"
+        assert entry["first_seen"] == entry["last_activated"] == "2026-11-27T08:00:00+00:00"
         assert entry["cleared"] is None
         assert log.active_count == 1
 
@@ -69,7 +69,7 @@ class TestDM1FaultLog:
         log = DM1FaultLog()
         log.observe([EMERGENCY_STOP], T0)
         assert log.observe([EMERGENCY_STOP], T0 + timedelta(seconds=5)) is False
-        assert log.entries[0]["last_active"] == "2026-11-27T08:00:00+00:00"
+        assert log.entries[0]["last_activated"] == "2026-11-27T08:00:00+00:00"
 
     def test_cleared_when_same_source_reports_no_fault(self):
         log = DM1FaultLog()
@@ -97,7 +97,7 @@ class TestDM1FaultLog:
         assert entry["count"] == 2
         assert entry["occurrence_count"] == 2
         assert entry["first_seen"] == "2026-11-27T08:00:00+00:00"
-        assert entry["last_active"] == "2026-11-27T08:02:00+00:00"
+        assert entry["last_activated"] == "2026-11-27T08:02:00+00:00"
         assert entry["cleared"] is None
 
     def test_occurrence_count_change_while_active_is_recorded(self):
@@ -133,6 +133,37 @@ class TestDM1FaultLog:
         assert len(log.entries) == 3
         assert 1 in spns  # active entry kept despite being oldest
         assert spns == {1, 4, 5}
+
+    def test_trim_keeps_recently_cleared_long_running_fault(self):
+        """Eviction uses most recent activity, not activation time."""
+        log = DM1FaultLog(max_entries=3)
+        log.observe([_report(source=OTHER_SA, spn=999, fmi=1, desc="Long")], T0)
+        for i in range(1, 4):
+            log.observe([_report(spn=i, fmi=1, desc=f"F{i}")], T0 + timedelta(hours=i))
+        log.observe([_report()], T0 + timedelta(hours=4))  # MAN fault 3 clears
+        log.observe([_report(source=OTHER_SA)], T0 + timedelta(days=5))  # 999 clears
+        log.observe([_report(spn=50, fmi=1, desc="New")], T0 + timedelta(days=5, minutes=1))
+        spns = {e["spn"] for e in log.entries}
+        assert 999 in spns
+        assert spns == {999, 3, 50}
+
+    def test_last_frame_per_source_wins_within_payload(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        assert log.observe([EMERGENCY_STOP, _report()], T0 + timedelta(seconds=5)) is True
+        assert log.entries[0]["active"] is False
+        # And a fault in the last frame is logged even if an earlier frame had none
+        log2 = DM1FaultLog()
+        log2.observe([_report(), EMERGENCY_STOP], T0)
+        assert log2.active_count == 1
+
+    def test_subsecond_activations_order_most_recent_first(self):
+        log = DM1FaultLog()
+        log.observe([_report(spn=10, fmi=1, desc="A")], T0)
+        log.observe([_report(source=OTHER_SA, spn=20, fmi=1, desc="B")], T0 + timedelta(milliseconds=500))
+        assert [e["spn"] for e in log.entries] == [20, 10]
+        restored = DM1FaultLog.from_dict(log.as_dict())
+        assert [e["spn"] for e in restored.entries] == [20, 10]
 
     def test_round_trip_serialization(self):
         log = DM1FaultLog()
@@ -241,6 +272,27 @@ class TestFaultHistorySensor:
         assert sensor.native_value == 1
         assert attrs["active_faults"] == 0
         assert attrs["faults"][0]["cleared"] is not None
+
+    def test_state_written_only_on_change(self):
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        coord._parse_payload(_payload("C0FF00000000FFFF"))
+        sensor._handle_coordinator_update()
+        assert sensor.state_writes == 0
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        sensor._handle_coordinator_update()
+        sensor._handle_coordinator_update()
+        assert sensor.state_writes == 1
+
+    def test_faults_attribute_excluded_from_recorder(self):
+        assert "faults" in SenquipDM1FaultHistorySensor._unrecorded_attributes
+
+    def test_payload_before_entity_added_is_logged(self):
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        asyncio.run(sensor.async_added_to_hass())
+        assert sensor.extra_state_attributes["active_faults"] == 1
 
     def test_restores_log_on_startup(self):
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
