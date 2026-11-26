@@ -8,7 +8,7 @@ from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, 
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
-from .decoder import DM1_PGN, J1939Decoder
+from .decoder import DM1_PGN, J1939Decoder, dm1_lamp_state
 from .overlay import merge_j1939_databases
 
 
@@ -225,10 +225,10 @@ class J1939CANProtocol:
                         custom_faults,
                     )
                     dm1_values = {
-                        f"can.{port_id}.j1939.dm1.protect_lamp": "Active" if dm1.lamp_protect else "Off",
-                        f"can.{port_id}.j1939.dm1.amber_warning": "Active" if dm1.lamp_amber else "Off",
-                        f"can.{port_id}.j1939.dm1.red_stop": "Active" if dm1.lamp_red else "Off",
-                        f"can.{port_id}.j1939.dm1.mil": "Active" if dm1.lamp_mil else "Off",
+                        f"can.{port_id}.j1939.dm1.protect_lamp": dm1_lamp_state(dm1.lamp_protect),
+                        f"can.{port_id}.j1939.dm1.amber_warning": dm1_lamp_state(dm1.lamp_amber),
+                        f"can.{port_id}.j1939.dm1.red_stop": dm1_lamp_state(dm1.lamp_red),
+                        f"can.{port_id}.j1939.dm1.mil": dm1_lamp_state(dm1.lamp_mil),
                         f"can.{port_id}.j1939.dm1.active_spn": dm1.active_spn,
                         f"can.{port_id}.j1939.dm1.active_fmi": dm1.active_fmi,
                         f"can.{port_id}.j1939.dm1.active_fault": fault_desc,

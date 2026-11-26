@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.senquip.can_protocols.j1939.decoder import J1939Decoder
+from custom_components.senquip.can_protocols.j1939.decoder import J1939Decoder, dm1_lamp_state
 from custom_components.senquip.can_protocols.j1939.database import (
     PGN_DATABASE,
     SPN_DATABASE,
@@ -401,3 +401,70 @@ class TestStateMappedSPN:
         data = bytes([0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         result = J1939Decoder.decode_spn(self.GEARBOX_SPN, data)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# DM1 decoding
+# ---------------------------------------------------------------------------
+
+class TestDecodeDM1:
+    """DM1 lamp and DTC decoding per J1939-73."""
+
+    @pytest.mark.parametrize(
+        "lamp_byte, protect, amber, red, mil",
+        [
+            (0x01, "Active", "Off", "Off", "Off"),
+            (0x04, "Off", "Active", "Off", "Off"),
+            (0x10, "Off", "Off", "Active", "Off"),
+            (0x40, "Off", "Off", "Off", "Active"),
+            (0x00, "Off", "Off", "Off", "Off"),
+        ],
+    )
+    def test_lamp_bit_positions(self, decoder, lamp_byte, protect, amber, red, mil):
+        result = decoder.decode_dm1(bytes([lamp_byte]) + bytes.fromhex("FF00000000FFFF"))
+        assert dm1_lamp_state(result.lamp_protect) == protect
+        assert dm1_lamp_state(result.lamp_amber) == amber
+        assert dm1_lamp_state(result.lamp_red) == red
+        assert dm1_lamp_state(result.lamp_mil) == mil
+
+    def test_man_no_fault_mil_not_available(self, decoder):
+        """Live MAN D2862 frame: MIL=11 (unused) must not read as Red Stop."""
+        result = decoder.decode_dm1(bytes.fromhex("C0FF00000000FFFF"), big_endian_spn=True)
+        assert dm1_lamp_state(result.lamp_red) == "Off"
+        assert dm1_lamp_state(result.lamp_amber) == "Off"
+        assert dm1_lamp_state(result.lamp_protect) == "Off"
+        assert dm1_lamp_state(result.lamp_mil) == "Not Available"
+        assert (result.active_spn, result.active_fmi) == (0, 0)
+
+    def test_cummins_no_fault_protect_not_available(self, decoder):
+        """Live Cummins QSB4.5 frame: Protect=11 (unsupported)."""
+        result = decoder.decode_dm1(bytes.fromhex("03FF00000000FFFF"))
+        assert dm1_lamp_state(result.lamp_protect) == "Not Available"
+        assert dm1_lamp_state(result.lamp_mil) == "Off"
+        assert dm1_lamp_state(result.lamp_red) == "Off"
+
+    def test_man_pdf_example_emergency_stop(self, decoder):
+        """MAN PDF trace C1 FF FE 00 C2 01: Protect ON, SPN 520198 FMI 2 OC 1."""
+        result = decoder.decode_dm1(bytes.fromhex("C1FFFE00C201FFFF"), big_endian_spn=True)
+        assert dm1_lamp_state(result.lamp_protect) == "Active"
+        assert dm1_lamp_state(result.lamp_red) == "Off"
+        assert dm1_lamp_state(result.lamp_mil) == "Not Available"
+        assert result.active_spn == 520198
+        assert result.active_fmi == 2
+        assert result.occurrence_count == 1
+
+    def test_little_endian_dtc(self, decoder):
+        result = decoder.decode_dm1(bytes.fromhex("04FF6E000001FFFF"))
+        assert result.active_spn == 110
+        assert result.active_fmi == 0
+        assert result.occurrence_count == 1
+        assert dm1_lamp_state(result.lamp_amber) == "Active"
+
+    def test_all_ones_dtc_is_no_fault(self, decoder):
+        result = decoder.decode_dm1(bytes.fromhex("00FFFFFFFFFFFFFF"))
+        assert (result.active_spn, result.active_fmi, result.occurrence_count) == (0, 0, 0)
+        assert decoder.get_fault_description(result.active_spn, result.active_fmi) == "No Active Fault"
+
+    def test_lamp_reserved_value_not_available(self, decoder):
+        result = decoder.decode_dm1(bytes.fromhex("20FF00000000FFFF"))
+        assert dm1_lamp_state(result.lamp_red) == "Not Available"

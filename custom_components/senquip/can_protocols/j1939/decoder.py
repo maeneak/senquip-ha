@@ -41,14 +41,35 @@ FMI_DESCRIPTIONS: dict[int, str] = {
 }
 
 
+# DM1 lamp status is a 2-bit field per lamp (J1939-73):
+#   00 = Off, 01 = On, 10 = Reserved, 11 = Not available
+DM1_LAMP_OFF = 0b00
+DM1_LAMP_ON = 0b01
+
+# All 19 SPN bits set — sent by some ECUs in place of SPN 0 when no DTC is active
+DM1_SPN_NOT_AVAILABLE = 0x7FFFF
+
+
+def dm1_lamp_state(value: int) -> str:
+    """Map a 2-bit DM1 lamp status to a sensor state string."""
+    if value == DM1_LAMP_ON:
+        return "Active"
+    if value == DM1_LAMP_OFF:
+        return "Off"
+    return "Not Available"
+
+
 @dataclass(frozen=True)
 class DM1Result:
-    """Decoded DM1 (Diagnostic Message 1) frame."""
+    """Decoded DM1 (Diagnostic Message 1) frame.
 
-    lamp_protect: bool
-    lamp_amber: bool
-    lamp_red: bool
-    lamp_mil: bool
+    Lamp fields hold the raw 2-bit status (see ``dm1_lamp_state``).
+    """
+
+    lamp_protect: int
+    lamp_amber: int
+    lamp_red: int
+    lamp_mil: int
     active_spn: int
     active_fmi: int
     occurrence_count: int
@@ -152,8 +173,9 @@ class J1939Decoder:
         """Decode a DM1 (Diagnostic Message 1) single frame.
 
         DM1 format (J1939-73):
-          Byte 1: Lamp status (2-bit fields)
-          Byte 2: Reserved (0xFF)
+          Byte 1: Lamp status (2-bit fields, LSB first)
+                  bits 1-2 Protect, 3-4 Amber Warning, 5-6 Red Stop, 7-8 MIL
+          Byte 2: Flash lamp status (unused, 0xFF)
           Bytes 3-6: DTC (SPN + FMI + OC)
           Bytes 7-8: 0xFFFF padding (single-DTC frame)
 
@@ -168,12 +190,12 @@ class J1939Decoder:
         if len(data_bytes) < 6:
             return None
 
-        # Byte 1: Lamp status — 2-bit fields
+        # Byte 1: Lamp status — 2-bit fields, Protect in the least significant bits
         lamp_byte = data_bytes[0]
-        lamp_protect = (lamp_byte & 0x04) != 0  # bits 3-4 (value != 0b00)
-        lamp_amber = (lamp_byte & 0x10) != 0  # bits 5-6
-        lamp_red = (lamp_byte & 0x40) != 0  # bits 7-8
-        lamp_mil = (lamp_byte & 0x01) != 0  # bits 1-2
+        lamp_protect = lamp_byte & 0x03  # bits 1-2 (SPN 987)
+        lamp_amber = (lamp_byte >> 2) & 0x03  # bits 3-4 (SPN 624)
+        lamp_red = (lamp_byte >> 4) & 0x03  # bits 5-6 (SPN 623)
+        lamp_mil = (lamp_byte >> 6) & 0x03  # bits 7-8 (SPN 1213)
 
         # Bytes 3-6 (0-indexed: 2-5): DTC
         byte3 = data_bytes[2]
@@ -191,10 +213,11 @@ class J1939Decoder:
         fmi = byte5 & 0x1F
         occurrence_count = byte6 & 0x7F
 
-        # Check for "no fault" — all DTC bytes are 0x00 or 0xFF
-        if byte3 == 0 and byte4 == 0 and (byte5 >> 5) == 0 and fmi == 0:
+        # "No fault" — DTC is all zeros (J1939-73) or all ones (some ECUs)
+        if (spn == 0 and fmi == 0) or spn == DM1_SPN_NOT_AVAILABLE:
             spn = 0
             fmi = 0
+            occurrence_count = 0
 
         return DM1Result(
             lamp_protect=lamp_protect,
