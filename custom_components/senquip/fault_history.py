@@ -102,6 +102,11 @@ class DM1FaultLog:
             latest_by_source[source] = report
 
         reporting_sources = set(latest_by_source)
+        # A multi-packet DM1 hides which DTCs are active, so a source's
+        # individual faults are only cleared by a single-frame DM1 without them
+        multi_packet_sources = {
+            source for source, report in latest_by_source.items() if report.get("multi_packet")
+        }
         current: dict[_FaultKey, Mapping[str, Any]] = {}
         for source, report in latest_by_source.items():
             if report.get("multi_packet"):
@@ -154,6 +159,8 @@ class DM1FaultLog:
                     changed = True
 
         for key, entry in self._entries.items():
+            if key[0] in multi_packet_sources and key[1] != _MULTI_PACKET:
+                continue
             if entry["active"] and key[0] in reporting_sources and key not in current:
                 entry["active"] = False
                 entry["cleared"] = timestamp

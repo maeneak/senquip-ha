@@ -114,7 +114,7 @@ The optional `dm1` section configures manufacturer-specific DM1 decoding:
 
 - `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (MAN)
 - `ports`: limit `spn_encoding` to these ports (empty = all ports using the profile)
-- `source_addresses`: limit `spn_encoding` to DM1 from these J1939 source addresses (empty = all), so other ECUs on the same bus keep standard decoding
+- `source_addresses`: limit `spn_encoding` to DM1 from these J1939 source addresses (empty = all), so other ECUs on the same bus keep standard decoding. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. If every entry is invalid, big-endian decoding is turned off rather than applied to all sources
 - `custom_fault_spns`: names for proprietary fault SPNs
 
 ### Current bundled profile

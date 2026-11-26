@@ -243,11 +243,15 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
             coordinator.hass,
             FAULT_HISTORY_STORE_VERSION,
             fault_history_store_key(device_id, port_id),
+            atomic_writes=True,
         )
 
     async def async_added_to_hass(self) -> None:
-        """Load the persisted fault log."""
-        await super().async_added_to_hass()
+        """Load the persisted fault log, then start listening for updates.
+
+        Loading first means no coordinator update can land on the empty
+        placeholder log while the file is being read.
+        """
         stored = await self._store.async_load()
         if stored is not None:
             self._log = DM1FaultLog.from_dict(stored)
@@ -257,13 +261,22 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
             if last_extra is not None:
                 self._log = DM1FaultLog.from_dict(last_extra.as_dict())
                 self._schedule_save()
+        await super().async_added_to_hass()
         # Catch a payload that arrived before this entity was listening
         if self._observe_latest():
             self._schedule_save()
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Flush any pending save so it cannot land after the file is deleted."""
+        await super().async_will_remove_from_hass()
+        await self._store.async_save(self._log.as_dict())
+
     def _schedule_save(self) -> None:
-        """Write the log to .storage after a short delay."""
-        self._store.async_delay_save(self._log.as_dict, FAULT_HISTORY_SAVE_DELAY)
+        """Write the log to .storage after a short delay.
+
+        The data is read when the write happens, so it is always the current log.
+        """
+        self._store.async_delay_save(lambda: self._log.as_dict(), FAULT_HISTORY_SAVE_DELAY)
 
     def _observe_latest(self) -> bool:
         """Feed the latest payload's DM1 frames into the log."""

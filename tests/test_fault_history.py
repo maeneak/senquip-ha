@@ -313,6 +313,8 @@ class TestFaultHistorySensor:
         original._handle_coordinator_update()
         assert original._store.save_calls == 1
         assert original._store.key == fault_history_store_key("test_dev", "can2")
+        assert original._store.kwargs.get("atomic_writes") is True
+        original._store.flush()
 
         # A new entity (e.g. after restart) loads the log from .storage
         coord._dm1_reports = {}
@@ -330,7 +332,46 @@ class TestFaultHistorySensor:
         sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy.as_dict()))
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.native_value == 1
+        sensor._store.flush()
         assert Store.saved[fault_history_store_key("test_dev", "can2")] == legacy.as_dict()
+
+    def test_update_during_load_does_not_overwrite_history(self):
+        """A payload landing while .storage is read must not save the empty log."""
+        stored = DM1FaultLog()
+        for spn in (100, 110, 520198):
+            stored.observe([_report(spn=spn, fmi=1, desc=f"F{spn}")], T0 + timedelta(minutes=spn % 7))
+        key = fault_history_store_key("test_dev", "can2")
+        Store.saved[key] = stored.as_dict()
+
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        real_load = sensor._store.async_load
+
+        async def load_with_racing_update():
+            # The last stored fault is still active; a payload repeating it arrives mid-load
+            coord._dm1_reports = {"can2": [_report(spn=520198, fmi=1, desc="F520198")]}
+            sensor._handle_coordinator_update()
+            return await real_load()
+
+        sensor._store.async_load = load_with_racing_update
+        asyncio.run(sensor.async_added_to_hass())
+        sensor._store.flush()
+        assert len(Store.saved[key]["entries"]) == 3
+        assert sensor.native_value == 3
+
+    def test_pending_save_flushed_on_removal(self):
+        """Removal writes immediately so no delayed save lands after deletion."""
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        sensor._handle_coordinator_update()
+        key = fault_history_store_key("test_dev", "can2")
+        assert key not in Store.saved  # still pending
+        asyncio.run(sensor.async_will_remove_from_hass())
+        assert len(Store.saved[key]["entries"]) == 1
+        asyncio.run(async_remove_entry(MagicMock(), ConfigEntry(data={"device_id": "test_dev"})))
+        sensor._store.flush()  # nothing pending any more
+        assert key not in Store.saved
 
     def test_store_preferred_over_restore_state(self):
         stored = DM1FaultLog()

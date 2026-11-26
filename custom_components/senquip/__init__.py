@@ -390,5 +390,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if not device_id:
         return
     for port_id in CAN_PORTS:
-        store = Store(hass, FAULT_HISTORY_STORE_VERSION, fault_history_store_key(device_id, port_id))
+        store = Store(
+            hass,
+            FAULT_HISTORY_STORE_VERSION,
+            fault_history_store_key(device_id, port_id),
+            atomic_writes=True,
+        )
         await store.async_remove()

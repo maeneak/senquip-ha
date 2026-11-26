@@ -54,6 +54,44 @@ DM1_LAMP_ON = 0b01
 # All 19 SPN bits set — sent by some ECUs in place of SPN 0 when no DTC is active
 DM1_SPN_NOT_AVAILABLE = 0x7FFFF
 
+# A DM1 source missing from this many consecutive DM1-bearing payloads is dropped
+DM1_SOURCE_MAX_MISSED_PAYLOADS = 5
+
+
+def dm1_fault_count_text(count: int, suffix: str = "") -> str:
+    """Return e.g. "1 Active Fault" / "3 Active Faults" plus an optional suffix."""
+    noun = "Fault" if count == 1 else "Faults"
+    return f"{count} Active {noun}{suffix}"
+
+
+class DM1SourceTracker:
+    """Latest DM1 report per source address on one port, kept across payloads.
+
+    A Senquip payload holds one frame per CAN ID, and every BAM from an ECU
+    shares one TP.CM ID, so a source can be missing from individual payloads
+    (e.g. its TP.CM slot held an EC1 announcement). Keeping the last report
+    stops port-level values flapping between payloads.
+    """
+
+    def __init__(self, max_missed: int = DM1_SOURCE_MAX_MISSED_PAYLOADS) -> None:
+        self._max_missed = max_missed
+        self._reports: dict[int, dict] = {}
+        self._missed: dict[int, int] = {}
+
+    def update(self, current: dict[int, dict]) -> list[dict]:
+        """Merge one payload's reports and return the latest report per source."""
+        for source in list(self._reports):
+            if source in current:
+                continue
+            self._missed[source] += 1
+            if self._missed[source] > self._max_missed:
+                del self._reports[source]
+                del self._missed[source]
+        for source, report in current.items():
+            self._reports[source] = report
+            self._missed[source] = 0
+        return list(self._reports.values())
+
 
 def dm1_lamp_state(value: int) -> str:
     """Map a 2-bit DM1 lamp status to a sensor state string."""
@@ -99,6 +137,8 @@ class J1939Decoder:
         self._pgn_db = pgn_database if pgn_database is not None else PGN_DATABASE
         self._spn_db = spn_database if spn_database is not None else SPN_DATABASE
         self._dm1_config = dm1_config
+        # One decoder is built per port, so this tracks that port's DM1 sources
+        self.dm1_tracker = DM1SourceTracker()
 
     @staticmethod
     def extract_pgn(can_id: int) -> tuple[int, int, int]:

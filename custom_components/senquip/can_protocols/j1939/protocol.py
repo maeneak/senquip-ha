@@ -8,7 +8,13 @@ from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, 
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
-from .decoder import DM1_PGN, TP_CM_PGN, J1939Decoder, dm1_lamp_state
+from .decoder import (
+    DM1_PGN,
+    TP_CM_PGN,
+    J1939Decoder,
+    dm1_fault_count_text,
+    dm1_lamp_state,
+)
 from .overlay import merge_j1939_databases
 
 
@@ -86,18 +92,27 @@ def _combine_dm1_reports(port_id: str, reports: list[dict[str, Any]]) -> dict[st
     elif total == 1 and decoded:
         description = decoded[0]["active_fault"]
     elif decoded:
-        description = f"{total} Active Faults: " + "; ".join(r["active_fault"] for r in decoded)
+        description = dm1_fault_count_text(total, ": ") + "; ".join(
+            r["active_fault"] for r in decoded
+        )
     else:
-        description = f"{total} Active Faults (details not decoded)"
+        description = dm1_fault_count_text(total, " (details not decoded)")
     if len(description) > _MAX_STATE_LENGTH:
         description = description[: _MAX_STATE_LENGTH - 3] + "..."
 
-    first = decoded[0] if decoded else None
     values[prefix + "active_fault"] = description
     values[prefix + "active_fault_count"] = total
-    values[prefix + "active_spn"] = first["active_spn"] if first else 0
-    values[prefix + "active_fmi"] = first["active_fmi"] if first else 0
-    values[prefix + "occurrence_count"] = first["occurrence_count"] if first else 0
+    if decoded:
+        first = decoded[0]
+        values[prefix + "active_spn"] = first["active_spn"]
+        values[prefix + "active_fmi"] = first["active_fmi"]
+        values[prefix + "occurrence_count"] = first["occurrence_count"]
+    elif total == 0:
+        values[prefix + "active_spn"] = 0
+        values[prefix + "active_fmi"] = 0
+        values[prefix + "occurrence_count"] = 0
+    # else: faults are active but none could be decoded (multi-packet only).
+    # Leave SPN/FMI/OC unchanged rather than report 0, which means "no fault".
     return values
 
 
@@ -320,7 +335,7 @@ class J1939CANProtocol:
                         "dtc_count": dtc_count,
                         "active_spn": None,
                         "active_fmi": None,
-                        "active_fault": f"{dtc_count} Active Faults (details not decoded)",
+                        "active_fault": dm1_fault_count_text(dtc_count, " (details not decoded)"),
                         "occurrence_count": None,
                         "lamps": None,
                     }
@@ -354,7 +369,8 @@ class J1939CANProtocol:
             diagnostics.append(frame_diag)
 
         if dm1_by_source:
-            combined = _combine_dm1_reports(port_id, list(dm1_by_source.values()))
+            reports = decoder.dm1_tracker.update(dm1_by_source)
+            combined = _combine_dm1_reports(port_id, reports)
             for key, value in combined.items():
                 if key in selected_signals:
                     values[key] = value

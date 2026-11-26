@@ -70,8 +70,18 @@ class TestDM1BAM:
         assert values[PREFIX + "active_fault"] == "3 Active Faults (details not decoded)"
         assert values[PREFIX + "active_fault_count"] == 3
         assert values[PREFIX + "red_stop"] == "Unknown"
-        assert values[PREFIX + "active_spn"] == 0
         assert diagnostics[0]["dm1"]["multi_packet"] is True
+
+    def test_multi_packet_leaves_spn_fmi_oc_unchanged(self):
+        """0 means "no fault", so undecodable faults must not report SPN 0."""
+        values, _, _ = _decode([MAN_BAM_3_DTCS])
+        assert PREFIX + "active_spn" not in values
+        assert PREFIX + "active_fmi" not in values
+        assert PREFIX + "occurrence_count" not in values
+
+    def test_single_dtc_bam_is_singular(self):
+        values, _, _ = _decode([{"id": 0x1CECFF00, "data": "20060001FFCAFE00"}])
+        assert values[PREFIX + "active_fault"] == "1 Active Fault (details not decoded)"
 
     def test_non_dm1_bam_ignored(self):
         values, diagnostics, _ = _decode([EC1_BAM])
@@ -122,6 +132,33 @@ class TestMultiSourceDM1:
         assert values[PREFIX + "amber_warning"] == "Active"
         assert values[PREFIX + "red_stop"] == "Unknown"
 
+    def test_source_missing_from_payload_is_remembered(self):
+        """Another BAM in the shared TP.CM slot must not drop the source's faults."""
+        protocol, decoder = _man_runtime()
+        run = lambda frames: protocol.decode_runtime(frames, "can2", ALL_DM1, decoder)[0]
+        values = run([MAN_BAM_3_DTCS, GEARBOX_COOLANT_LE])
+        assert values[PREFIX + "active_fault_count"] == 4
+        # Next payload: SA 0x00's TP.CM slot holds an EC1 BAM instead
+        values = run([EC1_BAM, GEARBOX_COOLANT_LE])
+        assert values[PREFIX + "active_fault_count"] == 4
+        assert values[PREFIX + "red_stop"] == "Unknown"
+
+    def test_source_dropped_after_missed_payloads(self):
+        protocol, decoder = _man_runtime()
+        run = lambda frames: protocol.decode_runtime(frames, "can2", ALL_DM1, decoder)[0]
+        run([MAN_BAM_3_DTCS, GEARBOX_COOLANT_LE])
+        for _ in range(5):
+            assert run([GEARBOX_COOLANT_LE])[PREFIX + "active_fault_count"] == 4
+        assert run([GEARBOX_COOLANT_LE])[PREFIX + "active_fault_count"] == 1
+
+    def test_payload_without_dm1_emits_nothing(self):
+        protocol, decoder = _man_runtime()
+        protocol.decode_runtime([MAN_ESTOP_BE], "can2", ALL_DM1, decoder)
+        values, _, _ = protocol.decode_runtime(
+            [{"id": 217056256, "data": "3FFFCD883927F4FF"}], "can2", ALL_DM1, decoder
+        )
+        assert not any(key.startswith(PREFIX) for key in values)
+
     def test_long_description_truncated_to_state_limit(self):
         frames = [
             {"id": 0x18FECA00 | sa, "data": "04FF6E000001FFFF"} for sa in range(1, 12)
@@ -143,7 +180,7 @@ class TestPerSourceEncoding:
     def test_man_profile_sources(self):
         profiles = discover_profiles(Path("custom_components/senquip/can_profiles"))
         _, _, dm1 = parse_j1939_profile(profiles["man_d2862.json"])
-        assert dm1.source_addresses == (0, 39)
+        assert dm1.source_addresses == (0, 1, 39)
 
     def test_other_source_on_man_port_decoded_little_endian(self):
         """A standard ECU sharing can2 with the MAN engine keeps LE SPN decoding."""
@@ -181,6 +218,23 @@ class TestPerSourceEncoding:
         )
         _, _, dm1 = parse_j1939_profile(profile)
         assert dm1.source_addresses == (0, 39)
+        assert dm1.spn_encoding == "big_endian"
+
+    def test_all_invalid_source_addresses_disable_big_endian(self):
+        """An empty filter means "all", so an all-invalid list must not widen it."""
+        profile = CANProfile(
+            filename="hex.json",
+            name="Hex",
+            base_protocol="j1939",
+            description="",
+            protocol_data={"j1939": {"dm1": {
+                "spn_encoding": "big_endian",
+                "source_addresses": ["0x00"],
+            }}},
+        )
+        _, _, dm1 = parse_j1939_profile(profile)
+        assert dm1.spn_encoding == "little_endian"
+        assert J1939Decoder(dm1_config=dm1).is_dm1_big_endian("can2", 3) is False
 
 
 # ---------------------------------------------------------------------------
@@ -203,3 +257,28 @@ class TestFaultLogMultiPacket:
         [entry] = restored.entries
         assert entry["description"] == "4 Active Faults (details not decoded)"
         assert entry["count"] == 1
+
+    def test_switch_to_multi_packet_keeps_existing_faults_active(self):
+        """Going from 1 DTC to a BAM must not mark the known DTC as cleared."""
+        from datetime import datetime, timedelta, timezone
+        t0 = datetime(2026, 11, 27, tzinfo=timezone.utc)
+        _, single, _ = _decode([MAN_ESTOP_BE])
+        _, multi, _ = _decode([MAN_BAM_3_DTCS])
+        _, clear, _ = _decode([MAN_NO_FAULT])
+        as_report = lambda diag: {"source_address": diag[0]["source_address"], **diag[0]["dm1"]}
+
+        log = DM1FaultLog()
+        log.observe([as_report(single)], t0)
+        log.observe([as_report(multi)], t0 + timedelta(minutes=1))
+        by_spn = {e["spn"]: e for e in log.entries}
+        assert by_spn[520198]["active"] is True
+        assert by_spn[None]["active"] is True
+        # Back to single-frame with the same DTC: no fake clear/re-activate
+        log.observe([as_report(single)], t0 + timedelta(minutes=2))
+        by_spn = {e["spn"]: e for e in log.entries}
+        assert by_spn[520198]["active"] is True
+        assert by_spn[520198]["count"] == 1
+        assert by_spn[None]["active"] is False
+        # A no-fault single frame clears it
+        log.observe([as_report(clear)], t0 + timedelta(minutes=3))
+        assert log.active_count == 0

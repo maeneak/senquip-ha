@@ -165,6 +165,13 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
             source_addresses.append(item)
         else:
             _LOGGER.warning("Invalid dm1.source_addresses entry in %s: %s", profile_name, item)
+    if sources_raw and not source_addresses and spn_encoding != "little_endian":
+        # An empty filter means "all sources"; don't widen a filter that was given
+        _LOGGER.warning(
+            "No valid dm1.source_addresses in %s; using little_endian DM1 encoding",
+            profile_name,
+        )
+        spn_encoding = "little_endian"
 
     custom_fault_spns: dict[int, str] = {}
     faults_raw = dm1_data.get("custom_fault_spns", {})
