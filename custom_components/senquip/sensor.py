@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from . import SenquipDataCoordinator
@@ -11,13 +12,15 @@ if TYPE_CHECKING:
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CAN_PORTS,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_SELECTED_SIGNALS,
@@ -26,6 +29,7 @@ from .const import (
     PORT_DISPLAY_NAMES,
     SensorMeta,
 )
+from .fault_history import DM1FaultLog
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,7 +120,7 @@ async def async_setup_entry(
     device_name: str = entry.data[CONF_DEVICE_NAME]
     selected: list[str] = entry.data[CONF_SELECTED_SIGNALS]
 
-    entities: list[SenquipSensorEntity] = []
+    entities: list[SensorEntity] = []
     for sensor_key in selected:
         meta = _resolve_sensor_meta(sensor_key, coordinator)
         entities.append(
@@ -128,6 +132,16 @@ async def async_setup_entry(
                 device_name=device_name,
             )
         )
+
+    for port_id in CAN_PORTS:
+        runtime = coordinator.get_can_runtime(port_id)
+        if runtime is None or runtime[0].protocol_id != "j1939":
+            continue
+        dm1_prefix = f"can.{port_id}.j1939.dm1."
+        if any(key.startswith(dm1_prefix) for key in selected):
+            entities.append(
+                SenquipDM1FaultHistorySensor(coordinator, port_id, device_id, device_name)
+            )
 
     if entities:
         async_add_entities(entities)
@@ -187,3 +201,83 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
             return None
         return self.coordinator.data.get(self._sensor_key)
 
+
+
+class _FaultLogStoredData(ExtraStoredData):
+    """Restore-state payload holding a serialized DM1 fault log."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def as_dict(self) -> dict[str, Any]:
+        return self._data
+
+
+class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
+    """Persistent log of DM1 faults seen on a J1939 CAN port.
+
+    State is the number of logged faults; the log itself is exposed in the
+    ``faults`` attribute and restored across Home Assistant restarts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_icon = "mdi:clipboard-text-clock"
+
+    def __init__(
+        self,
+        coordinator: SenquipDataCoordinator,
+        port_id: str,
+        device_id: str,
+        device_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._port_id = port_id
+        signal_key = f"can.{port_id}.j1939.dm1.fault_history"
+        self._attr_unique_id = f"{device_id}_{signal_key}"
+        self._attr_name = "DM1 Fault History"
+        self._attr_device_info = _build_device_info(signal_key, device_id, device_name)
+        self._log = DM1FaultLog()
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the fault log saved before the last shutdown."""
+        await super().async_added_to_hass()
+        last_extra = await self.async_get_last_extra_data()
+        if last_extra is not None:
+            self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+
+    @property
+    def extra_restore_state_data(self) -> ExtraStoredData:
+        """Return the fault log for restore storage."""
+        return _FaultLogStoredData(self._log.as_dict())
+
+    @property
+    def available(self) -> bool:
+        """The log is history, so it stays available while the device is offline."""
+        return True
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Feed the latest payload's DM1 frames into the log."""
+        self._log.observe(
+            self.coordinator.get_dm1_reports(self._port_id),
+            datetime.now(timezone.utc),
+        )
+        super()._handle_coordinator_update()
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the number of logged faults."""
+        return len(self._log.entries)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the fault log."""
+        entries = self._log.entries
+        latest = entries[0] if entries else None
+        return {
+            "active_faults": self._log.active_count,
+            "last_fault": latest["description"] if latest else None,
+            "last_fault_time": latest["last_active"] if latest else None,
+            "faults": entries,
+        }

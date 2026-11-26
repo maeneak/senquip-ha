@@ -1,0 +1,256 @@
+"""Tests for the DM1 fault history log and its sensor entity."""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import MagicMock
+
+from custom_components.senquip import SenquipDataCoordinator
+from custom_components.senquip.can_profiles.loader import discover_profiles
+from custom_components.senquip.fault_history import DM1FaultLog
+from custom_components.senquip.sensor import (
+    SenquipDM1FaultHistorySensor,
+    async_setup_entry,
+)
+from tests.ha_stubs import ConfigEntry
+
+T0 = datetime(2026, 11, 27, 8, 0, 0, tzinfo=timezone.utc)
+MAN_SA = 0x27
+OTHER_SA = 0x3D
+
+_NO_LAMPS = {"protect": "Off", "amber_warning": "Off", "red_stop": "Off", "mil": "Not Available"}
+
+
+def _report(source=MAN_SA, spn=0, fmi=0, oc=0, desc="No Active Fault", lamps=None):
+    return {
+        "source_address": source,
+        "active_spn": spn,
+        "active_fmi": fmi,
+        "active_fault": desc,
+        "occurrence_count": oc,
+        "lamps": lamps if lamps is not None else _NO_LAMPS,
+    }
+
+
+EMERGENCY_STOP = _report(
+    spn=520198,
+    fmi=2,
+    oc=1,
+    desc="SPN 520198: Emergency Stop (FMI 2: Data Erratic/Incorrect)",
+    lamps={"protect": "Active", "amber_warning": "Off", "red_stop": "Off", "mil": "Not Available"},
+)
+
+
+# ---------------------------------------------------------------------------
+# DM1FaultLog
+# ---------------------------------------------------------------------------
+
+class TestDM1FaultLog:
+    def test_new_fault_logged(self):
+        log = DM1FaultLog()
+        assert log.observe([EMERGENCY_STOP], T0) is True
+        [entry] = log.entries
+        assert entry["spn"] == 520198
+        assert entry["fmi"] == 2
+        assert entry["source_address"] == MAN_SA
+        assert entry["lamps"] == ["Protect"]
+        assert entry["active"] is True
+        assert entry["count"] == 1
+        assert entry["first_seen"] == entry["last_active"] == "2026-11-27T08:00:00+00:00"
+        assert entry["cleared"] is None
+        assert log.active_count == 1
+
+    def test_no_fault_frames_log_nothing(self):
+        log = DM1FaultLog()
+        assert log.observe([_report()], T0) is False
+        assert log.entries == []
+
+    def test_still_active_fault_is_not_a_change(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        assert log.observe([EMERGENCY_STOP], T0 + timedelta(seconds=5)) is False
+        assert log.entries[0]["last_active"] == "2026-11-27T08:00:00+00:00"
+
+    def test_cleared_when_same_source_reports_no_fault(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        assert log.observe([_report()], T0 + timedelta(minutes=1)) is True
+        entry = log.entries[0]
+        assert entry["active"] is False
+        assert entry["cleared"] == "2026-11-27T08:01:00+00:00"
+        assert log.active_count == 0
+
+    def test_not_cleared_by_other_source_or_missing_dm1(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        assert log.observe([], T0 + timedelta(minutes=1)) is False
+        assert log.observe([_report(source=OTHER_SA)], T0 + timedelta(minutes=2)) is False
+        assert log.entries[0]["active"] is True
+
+    def test_reactivation_increments_count(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        log.observe([_report()], T0 + timedelta(minutes=1))
+        assert log.observe([dict(EMERGENCY_STOP, occurrence_count=2)], T0 + timedelta(minutes=2)) is True
+        [entry] = log.entries
+        assert entry["active"] is True
+        assert entry["count"] == 2
+        assert entry["occurrence_count"] == 2
+        assert entry["first_seen"] == "2026-11-27T08:00:00+00:00"
+        assert entry["last_active"] == "2026-11-27T08:02:00+00:00"
+        assert entry["cleared"] is None
+
+    def test_occurrence_count_change_while_active_is_recorded(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        assert log.observe([dict(EMERGENCY_STOP, occurrence_count=3)], T0 + timedelta(seconds=5)) is True
+        assert log.entries[0]["occurrence_count"] == 3
+        assert log.entries[0]["count"] == 1
+
+    def test_faults_from_two_sources_tracked_separately(self):
+        log = DM1FaultLog()
+        other = _report(source=OTHER_SA, spn=110, fmi=0, oc=1, desc="Coolant")
+        log.observe([EMERGENCY_STOP, other], T0)
+        assert log.active_count == 2
+        # MAN clears; other source still reports its fault
+        log.observe([_report(), other], T0 + timedelta(minutes=1))
+        active = {(e["source_address"], e["spn"]) for e in log.entries if e["active"]}
+        assert active == {(OTHER_SA, 110)}
+
+    def test_entries_ordered_most_recent_first(self):
+        log = DM1FaultLog()
+        log.observe([_report(spn=100, fmi=1, desc="Oil")], T0)
+        log.observe([_report(spn=110, fmi=0, desc="Coolant")], T0 + timedelta(minutes=1))
+        assert [e["spn"] for e in log.entries] == [110, 100]
+
+    def test_trim_drops_oldest_inactive_and_keeps_active(self):
+        log = DM1FaultLog(max_entries=3)
+        # Long-running active fault from another source, logged first (oldest)
+        log.observe([_report(source=OTHER_SA, spn=1, fmi=1, desc="Long")], T0)
+        for i in range(2, 6):
+            log.observe([_report(spn=i, fmi=1, desc=f"F{i}")], T0 + timedelta(minutes=i))
+        spns = {e["spn"] for e in log.entries}
+        assert len(log.entries) == 3
+        assert 1 in spns  # active entry kept despite being oldest
+        assert spns == {1, 4, 5}
+
+    def test_round_trip_serialization(self):
+        log = DM1FaultLog()
+        log.observe([EMERGENCY_STOP], T0)
+        log.observe([_report()], T0 + timedelta(minutes=1))
+        restored = DM1FaultLog.from_dict(log.as_dict())
+        assert restored.entries == log.entries
+        # Restored log keeps tracking the same key
+        assert restored.observe([EMERGENCY_STOP], T0 + timedelta(minutes=2)) is True
+        assert restored.entries[0]["count"] == 2
+
+    def test_from_dict_skips_malformed(self):
+        good = DM1FaultLog()
+        good.observe([EMERGENCY_STOP], T0)
+        data = {"entries": [{"spn": "bad"}, "junk", *good.as_dict()["entries"]]}
+        assert len(DM1FaultLog.from_dict(data).entries) == 1
+        assert DM1FaultLog.from_dict(None).entries == []
+        assert DM1FaultLog.from_dict({"entries": "nope"}).entries == []
+
+
+# ---------------------------------------------------------------------------
+# Coordinator + entity integration
+# ---------------------------------------------------------------------------
+
+def _man_profiles():
+    return discover_profiles(Path("custom_components/senquip/can_profiles"))
+
+
+def _coordinator(selected):
+    entry = ConfigEntry(
+        data={
+            "device_id": "test_dev",
+            "device_name": "Test",
+            "mqtt_topic": "senquip/test",
+            "selected_signals": selected,
+            "port_configs": {
+                "can1": {"family": "can", "active": True, "protocol": "j1939", "profiles": []},
+                "can2": {
+                    "family": "can",
+                    "active": True,
+                    "protocol": "j1939",
+                    "profiles": ["man_d2862.json"],
+                },
+            },
+        }
+    )
+    return entry, SenquipDataCoordinator(MagicMock(), entry, _man_profiles())
+
+
+def _payload(can2_dm1):
+    return {
+        "deviceid": "test_dev",
+        "can2": [
+            {"id": 217056256, "data": "3FFFCD883927F4FF"},
+            {"id": 0x1CFECA27, "data": can2_dm1},
+        ],
+    }
+
+
+class TestCoordinatorDM1Reports:
+    def test_reports_collected_without_dm1_signals_selected(self):
+        _, coord = _coordinator(["can.can2.j1939.spn190"])
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        [report] = coord.get_dm1_reports("can2")
+        assert report["source_address"] == MAN_SA
+        assert report["active_spn"] == 520198
+        assert report["active_fmi"] == 2
+        assert report["lamps"]["protect"] == "Active"
+        assert coord.get_dm1_reports("can1") == []
+
+    def test_reports_reset_when_payload_has_no_dm1(self):
+        _, coord = _coordinator(["can.can2.j1939.spn190"])
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload({"deviceid": "test_dev", "can2": [{"id": 217056256, "data": "3FFFCD883927F4FF"}]})
+        assert coord.get_dm1_reports("can2") == []
+
+
+class TestFaultHistorySensor:
+    def test_created_only_for_ports_with_dm1_selected(self):
+        entry, coord = _coordinator(["can.can1.j1939.spn190", "can.can2.j1939.dm1.active_fault"])
+        hass = MagicMock()
+        hass.data = {"senquip": {entry.entry_id: coord}}
+        added = []
+        asyncio.run(async_setup_entry(hass, entry, added.extend))
+        history = [e for e in added if isinstance(e, SenquipDM1FaultHistorySensor)]
+        assert len(history) == 1
+        assert history[0]._attr_unique_id == "test_dev_can.can2.j1939.dm1.fault_history"
+
+    def test_logs_and_clears_from_coordinator_updates(self):
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        assert sensor.native_value == 0
+        assert sensor.available is True
+
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        sensor._handle_coordinator_update()
+        assert sensor.native_value == 1
+        attrs = sensor.extra_state_attributes
+        assert attrs["active_faults"] == 1
+        assert attrs["last_fault"].startswith("SPN 520198: Emergency Stop")
+        assert attrs["faults"][0]["lamps"] == ["Protect"]
+
+        coord._parse_payload(_payload("C0FF00000000FFFF"))
+        sensor._handle_coordinator_update()
+        attrs = sensor.extra_state_attributes
+        assert sensor.native_value == 1
+        assert attrs["active_faults"] == 0
+        assert attrs["faults"][0]["cleared"] is not None
+
+    def test_restores_log_on_startup(self):
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        original = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        original._handle_coordinator_update()
+        stored = original.extra_restore_state_data
+
+        restored = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        restored._stub_last_extra_data = stored
+        asyncio.run(restored.async_added_to_hass())
+        assert restored.native_value == 1
+        assert restored.extra_state_attributes["faults"] == original.extra_state_attributes["faults"]

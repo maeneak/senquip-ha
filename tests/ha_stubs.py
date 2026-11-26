@@ -162,6 +162,34 @@ class DataUpdateCoordinator:
 class CoordinatorEntity:
     def __init__(self, coordinator, *args, **kwargs):
         self.coordinator = coordinator
+        self.state_writes = 0
+
+    def _handle_coordinator_update(self):
+        self.async_write_ha_state()
+
+    def async_write_ha_state(self):
+        self.state_writes += 1
+
+
+# ---------------------------------------------------------------------------
+# homeassistant.helpers.restore_state
+# ---------------------------------------------------------------------------
+
+class ExtraStoredData:
+    def as_dict(self):
+        raise NotImplementedError
+
+
+class RestoreEntity:
+    """Stub — set ``_stub_last_extra_data`` on an instance to simulate a restore."""
+
+    _stub_last_extra_data = None
+
+    async def async_added_to_hass(self):
+        pass
+
+    async def async_get_last_extra_data(self):
+        return self._stub_last_extra_data
 
 
 # ---------------------------------------------------------------------------

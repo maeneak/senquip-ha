@@ -245,6 +245,12 @@ class J1939CANProtocol:
                         "active_fault": fault_desc,
                         "occurrence_count": dm1.occurrence_count,
                         "encoding": "big_endian" if big_endian else "little_endian",
+                        "lamps": {
+                            "protect": dm1_lamp_state(dm1.lamp_protect),
+                            "amber_warning": dm1_lamp_state(dm1.lamp_amber),
+                            "red_stop": dm1_lamp_state(dm1.lamp_red),
+                            "mil": dm1_lamp_state(dm1.lamp_mil),
+                        },
                     }
                 diagnostics.append(frame_diag)
                 continue
