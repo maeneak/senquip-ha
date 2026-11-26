@@ -27,6 +27,7 @@ Data flow:
 | `custom_components/senquip/config_flow.py` | Config flow and options flow: `user -> discover -> configure_ports -> select_signals`. |
 | `custom_components/senquip/const.py` | Config keys, known port families, `PortConfig`, `SensorMeta`, internal sensor metadata, SPN-to-HA unit mapping. |
 | `custom_components/senquip/sensor.py` | Metadata resolution from canonical keys and device grouping (base + CAN sub-devices). |
+| `custom_components/senquip/fault_history.py` | Pure-Python persistent DM1 fault log used by the fault history sensor. |
 | `custom_components/senquip/diagnostics.py` | Diagnostics payload using `selected_signals`, `port_configs`, and protocol-aware CAN summaries. |
 | `custom_components/senquip/can_protocols/base.py` | CAN protocol interface and discovered-signal type. |
 | `custom_components/senquip/can_protocols/registry.py` | Protocol registry/options. |
@@ -94,6 +95,9 @@ DM1 (PGN 65226) is decoded separately from normal SPNs.
 
 - Standard little-endian DM1 supported
 - MAN big-endian DM1 supported via profile `dm1.spn_encoding` and optional `dm1.ports`
+- Lamp byte is four 2-bit fields, LSB first: Protect, Amber, Red Stop, MIL. `00`=Off, `01`=Active, `10`/`11`=Not Available
+- Multi-packet (BAM/TP) DM1 with 2+ faults is not decoded
+- `fault_history.py` (`DM1FaultLog`) keeps a per-port fault log keyed by (source address, SPN, FMI). The coordinator exposes each payload's decoded DM1 frames via `get_dm1_reports(port)`, and `SenquipDM1FaultHistorySensor` (a `RestoreEntity`) feeds them into the log. It is created automatically for J1939 ports with any `dm1.` signal selected.
 
 ## Tests
 
@@ -114,6 +118,7 @@ Current notable tests:
 - `tests/test_config_flow_ports.py`
 - `tests/test_config_flow_steps.py`
 - `tests/test_raw_protocol.py`
+- `tests/test_fault_history.py`
 
 Tests run without Home Assistant installed by using stubs in:
 

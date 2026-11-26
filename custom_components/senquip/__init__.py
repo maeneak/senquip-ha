@@ -87,10 +87,19 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_online: bool = False
         self._offline_timer: Any = None
         self.diagnostics: dict[str, Any] = {}
+        self._dm1_reports: dict[str, list[dict[str, Any]]] = {}
 
     def get_can_runtime(self, port_id: str) -> tuple[Any, Any] | None:
         """Return protocol/decoder tuple for a CAN port if available."""
         return self._can_runtime.get(port_id)
+
+    def get_dm1_reports(self, port_id: str) -> list[dict[str, Any]]:
+        """Return the DM1 frames decoded on a port in the latest payload.
+
+        Each report carries ``source_address`` plus the decoded DM1 fields.
+        Populated regardless of which DM1 signals are selected.
+        """
+        return self._dm1_reports.get(port_id, [])
 
     def is_device_online(self) -> bool:
         """Return whether the device is online (receiving MQTT messages)."""
@@ -282,6 +291,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Parse raw JSON into a flat {signal_key: value} dict."""
         data: dict[str, Any] = {}
         diag: dict[str, Any] = {}
+        dm1_reports: dict[str, list[dict[str, Any]]] = {}
 
         for key, value in payload.items():
             if key in ("deviceid", "ts", "time"):
@@ -305,6 +315,13 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "protocol": protocol.protocol_id,
                         "frames": port_diag,
                     }
+                    reports = [
+                        {"source_address": frame.get("source_address"), **frame["dm1"]}
+                        for frame in port_diag
+                        if isinstance(frame.get("dm1"), dict)
+                    ]
+                    if reports:
+                        dm1_reports[key] = reports
                 continue
 
             if key == "events" and isinstance(value, list):
@@ -327,6 +344,7 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._can_port_available[port_id] = False
 
         self.diagnostics = diag
+        self._dm1_reports = dm1_reports
         return data
 
 

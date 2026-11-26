@@ -60,6 +60,24 @@ class TestRuntimeDecode:
         assert "can.can2.j1939.dm1.active_fault" in values
         assert "can.can2.j1939.dm1.active_spn" in values
 
+    def test_man_dm1_no_fault_lamps(self):
+        """Live MAN frame C0FF...: MIL not available must not report Red Stop."""
+        protocol, decoder = _build_decoder(with_man_profile=True)
+        frames = [{"id": 0x1CFECA27, "data": "C0FF00000000FFFF"}]
+        selected = {
+            "can.can2.j1939.dm1.active_fault",
+            "can.can2.j1939.dm1.protect_lamp",
+            "can.can2.j1939.dm1.amber_warning",
+            "can.can2.j1939.dm1.red_stop",
+            "can.can2.j1939.dm1.mil",
+        }
+        values, _, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
+        assert values["can.can2.j1939.dm1.active_fault"] == "No Active Fault"
+        assert values["can.can2.j1939.dm1.protect_lamp"] == "Off"
+        assert values["can.can2.j1939.dm1.amber_warning"] == "Off"
+        assert values["can.can2.j1939.dm1.red_stop"] == "Off"
+        assert values["can.can2.j1939.dm1.mil"] == "Not Available"
+
     def test_absent_can_port_marked_unavailable(self):
         """When MQTT payload omits a CAN key, that port becomes unavailable."""
         from custom_components.senquip import SenquipDataCoordinator
