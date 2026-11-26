@@ -5,14 +5,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from custom_components.senquip import SenquipDataCoordinator
+import pytest
+
+from custom_components.senquip import SenquipDataCoordinator, async_remove_entry
 from custom_components.senquip.can_profiles.loader import discover_profiles
-from custom_components.senquip.fault_history import DM1FaultLog
+from custom_components.senquip.fault_history import DM1FaultLog, fault_history_store_key
 from custom_components.senquip.sensor import (
     SenquipDM1FaultHistorySensor,
     async_setup_entry,
 )
-from tests.ha_stubs import ConfigEntry
+from tests.ha_stubs import ConfigEntry, Store
+
+
+@pytest.fixture(autouse=True)
+def _clear_store():
+    Store.saved.clear()
+    yield
+    Store.saved.clear()
 
 T0 = datetime(2026, 11, 27, 8, 0, 0, tzinfo=timezone.utc)
 MAN_SA = 0x27
@@ -294,15 +303,71 @@ class TestFaultHistorySensor:
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.extra_state_attributes["active_faults"] == 1
 
-    def test_restores_log_on_startup(self):
+    def test_saved_to_store_on_change_and_loaded_on_startup(self):
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
         original = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        coord._parse_payload(_payload("C0FF00000000FFFF"))
+        original._handle_coordinator_update()
+        assert original._store.save_calls == 0  # nothing changed, nothing saved
         coord._parse_payload(_payload("C1FFFE00C201FFFF"))
         original._handle_coordinator_update()
-        stored = original.extra_restore_state_data
+        assert original._store.save_calls == 1
+        assert original._store.key == fault_history_store_key("test_dev", "can2")
 
+        # A new entity (e.g. after restart) loads the log from .storage
+        coord._dm1_reports = {}
         restored = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
-        restored._stub_last_extra_data = stored
         asyncio.run(restored.async_added_to_hass())
         assert restored.native_value == 1
         assert restored.extra_state_attributes["faults"] == original.extra_state_attributes["faults"]
+
+    def test_migrates_log_from_restore_state(self):
+        """A log kept in restore-state data by 0.6.0 is moved into .storage."""
+        legacy = DM1FaultLog()
+        legacy.observe([EMERGENCY_STOP], T0)
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy.as_dict()))
+        asyncio.run(sensor.async_added_to_hass())
+        assert sensor.native_value == 1
+        assert Store.saved[fault_history_store_key("test_dev", "can2")] == legacy.as_dict()
+
+    def test_store_preferred_over_restore_state(self):
+        stored = DM1FaultLog()
+        stored.observe([EMERGENCY_STOP], T0)
+        Store.saved[fault_history_store_key("test_dev", "can2")] = stored.as_dict()
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value={"entries": []}))
+        asyncio.run(sensor.async_added_to_hass())
+        assert sensor.native_value == 1
+
+    def test_multi_packet_dm1_logged_and_cleared(self):
+        _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
+        # MAN at SA 0x00 announces a 3-DTC DM1 (14 bytes) via BAM
+        coord._parse_payload({"deviceid": "test_dev", "can2": [
+            {"id": 0x1CECFF00, "data": "200E0002FFCAFE00"},
+        ]})
+        sensor._handle_coordinator_update()
+        [entry] = sensor.extra_state_attributes["faults"]
+        assert entry["spn"] is None and entry["fmi"] is None
+        assert entry["source_address"] == 0x00
+        assert entry["description"] == "3 Active Faults (details not decoded)"
+        assert entry["active"] is True
+        # Back to a single-frame no-fault DM1 from the same source clears it
+        coord._parse_payload({"deviceid": "test_dev", "can2": [
+            {"id": 0x18FECA00, "data": "C0FF00000000FFFF"},
+        ]})
+        sensor._handle_coordinator_update()
+        assert sensor.extra_state_attributes["faults"][0]["active"] is False
+
+
+class TestRemoveEntry:
+    def test_remove_entry_deletes_fault_logs(self):
+        Store.saved[fault_history_store_key("test_dev", "can1")] = {"entries": []}
+        Store.saved[fault_history_store_key("test_dev", "can2")] = {"entries": []}
+        Store.saved[fault_history_store_key("other_dev", "can2")] = {"entries": []}
+        entry = ConfigEntry(data={"device_id": "test_dev"})
+        asyncio.run(async_remove_entry(MagicMock(), entry))
+        assert list(Store.saved) == [fault_history_store_key("other_dev", "can2")]

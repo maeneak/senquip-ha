@@ -92,6 +92,9 @@ _ha_helpers_restore = ModuleType("homeassistant.helpers.restore_state")
 _ha_helpers_restore.ExtraStoredData = ha_stubs.ExtraStoredData
 _ha_helpers_restore.RestoreEntity = ha_stubs.RestoreEntity
 
+_ha_helpers_storage = ModuleType("homeassistant.helpers.storage")
+_ha_helpers_storage.Store = ha_stubs.Store
+
 _ha_helpers_typing = ModuleType("homeassistant.helpers.typing")
 _ha_helpers_typing.StateType = ha_stubs.StateType
 
@@ -122,6 +125,7 @@ sys.modules.update({
     "homeassistant.helpers.device_registry": _ha_helpers_device,
     "homeassistant.helpers.entity_platform": _ha_helpers_platform,
     "homeassistant.helpers.restore_state": _ha_helpers_restore,
+    "homeassistant.helpers.storage": _ha_helpers_storage,
     "homeassistant.helpers.typing": _ha_helpers_typing,
     "homeassistant.helpers.event": _ha_helpers_event,
     "voluptuous": _vol,

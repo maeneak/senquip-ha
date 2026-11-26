@@ -94,10 +94,11 @@ J1939 overlay validation rules:
 DM1 (PGN 65226) is decoded separately from normal SPNs.
 
 - Standard little-endian DM1 supported
-- MAN big-endian DM1 supported via profile `dm1.spn_encoding` and optional `dm1.ports`
+- MAN big-endian DM1 supported via profile `dm1.spn_encoding`, optionally limited by `dm1.ports` and `dm1.source_addresses`. The MAN engines on the vessel transmit from SA 0x00, not the 0x27 in the MAN doc, so the MAN profile lists both
 - Lamp byte is four 2-bit fields, LSB first: Protect, Amber, Red Stop, MIL. `00`=Off, `01`=Active, `10`/`11`=Not Available
-- Multi-packet (BAM/TP) DM1 with 2+ faults is not decoded
-- `fault_history.py` (`DM1FaultLog`) keeps a per-port fault log keyed by (source address, SPN, FMI). The coordinator exposes each payload's decoded DM1 frames via `get_dm1_reports(port)`, and `SenquipDM1FaultHistorySensor` (a `RestoreEntity`) feeds them into the log. It is created automatically for J1939 ports with any `dm1.` signal selected.
+- A Senquip payload holds one frame per CAN ID, so multi-packet (BAM/TP) DM1 cannot be reassembled. A TP.CM BAM announcing PGN 65226 is detected and reported as a DTC count (`J1939Decoder.decode_dm1_bam`); that source's lamps are `Unknown`
+- `decode_runtime` keeps the latest DM1 report per source address, then `_combine_dm1_reports` produces the port-level `dm1.*` values (worst lamp state, all faults listed, `active_fault_count`)
+- `fault_history.py` (`DM1FaultLog`) keeps a per-port fault log keyed by (source address, SPN, FMI); a multi-packet DM1 is one entry per source with `spn`/`fmi` None. The coordinator exposes each payload's DM1 reports via `get_dm1_reports(port)`, and `SenquipDM1FaultHistorySensor` feeds them into the log and saves it with HA `Store` (`fault_history_store_key`). It is created automatically for J1939 ports with any `dm1.` signal selected. `async_remove_entry` deletes the stores
 
 ## Tests
 
@@ -119,6 +120,7 @@ Current notable tests:
 - `tests/test_config_flow_steps.py`
 - `tests/test_raw_protocol.py`
 - `tests/test_fault_history.py`
+- `tests/test_dm1_followups.py`
 
 Tests run without Home Assistant installed by using stubs in:
 

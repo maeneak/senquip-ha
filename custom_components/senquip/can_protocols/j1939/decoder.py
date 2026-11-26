@@ -13,6 +13,11 @@ _LOGGER = logging.getLogger(__name__)
 # DM1 — Diagnostic Message 1 (Active Diagnostic Trouble Codes)
 DM1_PGN = 65226
 
+# Transport Protocol Connection Management (J1939-21). DM1 with 2+ DTCs is sent
+# as a BAM: a TP.CM announcement followed by TP.DT packets.
+TP_CM_PGN = 60416
+TP_CM_BAM = 0x20
+
 # Standard J1939-73 Failure Mode Identifiers
 FMI_DESCRIPTIONS: dict[int, str] = {
     0: "Data Valid - Above Normal Range",
@@ -261,16 +266,45 @@ class J1939Decoder:
 
         return f"SPN {spn}: {spn_name} (FMI {fmi}: {fmi_desc})"
 
-    def is_dm1_big_endian(self, port: str) -> bool:
-        """Check if DM1 SPN encoding should be big-endian for a given port."""
+    @staticmethod
+    def decode_dm1_bam(data_bytes: bytes) -> int | None:
+        """Return the DTC count if a TP.CM frame is a BAM announcing a DM1.
+
+        TP.CM BAM layout (J1939-21): byte 1 control (0x20), bytes 2-3 total
+        message size (LE), byte 4 packet count, byte 5 reserved, bytes 6-8 PGN
+        (LE). A DM1 message is 2 lamp bytes plus 4 bytes per DTC.
+
+        Only the announcement is decoded: a Senquip payload holds one frame per
+        CAN ID, so the TP.DT packets carrying the DTCs cannot be reassembled.
+        """
+        if len(data_bytes) < 8 or data_bytes[0] != TP_CM_BAM:
+            return None
+        pgn = data_bytes[5] | (data_bytes[6] << 8) | (data_bytes[7] << 16)
+        if pgn != DM1_PGN:
+            return None
+        size = data_bytes[1] | (data_bytes[2] << 8)
+        if size < 6:
+            return None
+        return (size - 2) // 4
+
+    def is_dm1_big_endian(self, port: str, source_address: int | None = None) -> bool:
+        """Check if DM1 SPN encoding should be big-endian for a port and source.
+
+        Empty ``ports`` / ``source_addresses`` in the profile mean "all".
+        """
         if self._dm1_config is None:
             return False
         if self._dm1_config.spn_encoding != "big_endian":
             return False
-        # If ports list is empty, apply to all ports
-        if not self._dm1_config.ports:
-            return True
-        return port in self._dm1_config.ports
+        if self._dm1_config.ports and port not in self._dm1_config.ports:
+            return False
+        if (
+            self._dm1_config.source_addresses
+            and source_address is not None
+            and source_address not in self._dm1_config.source_addresses
+        ):
+            return False
+        return True
 
     def get_dm1_custom_fault_spns(self) -> dict[int, str]:
         """Return the custom fault SPN names from DM1 config."""
@@ -353,13 +387,13 @@ class J1939Decoder:
                 continue
 
             # Check for DM1 frame
-            _, pgn, _ = self.extract_pgn(can_id)
+            _, pgn, source = self.extract_pgn(can_id)
             if pgn == DM1_PGN:
                 try:
                     data_bytes = bytes.fromhex(hex_data)
                 except ValueError:
                     continue
-                big_endian = self.is_dm1_big_endian(port)
+                big_endian = self.is_dm1_big_endian(port, source)
                 dm1_result = self.decode_dm1(data_bytes, big_endian_spn=big_endian)
                 continue
 

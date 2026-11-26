@@ -239,6 +239,10 @@
         "ports": [
           "can2"
         ],
+        "source_addresses": [
+          0,
+          39
+        ],
         "custom_fault_spns": {
           "520192": "Engine Fuel Return Flow Pressure",
           "520194": "Sea Water Temperature",

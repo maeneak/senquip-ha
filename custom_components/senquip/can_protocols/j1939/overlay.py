@@ -18,6 +18,7 @@ class DM1Config:
 
     spn_encoding: str = "little_endian"
     ports: tuple[str, ...] = ()
+    source_addresses: tuple[int, ...] = ()
     custom_fault_spns: dict[int, str] = field(default_factory=dict)
 
 
@@ -154,6 +155,17 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
         ports_raw = []
     ports = tuple(str(item) for item in ports_raw)
 
+    sources_raw = dm1_data.get("source_addresses", [])
+    if not isinstance(sources_raw, list):
+        _LOGGER.warning("Invalid dm1.source_addresses in %s: must be a list", profile_name)
+        sources_raw = []
+    source_addresses: list[int] = []
+    for item in sources_raw:
+        if isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 255:
+            source_addresses.append(item)
+        else:
+            _LOGGER.warning("Invalid dm1.source_addresses entry in %s: %s", profile_name, item)
+
     custom_fault_spns: dict[int, str] = {}
     faults_raw = dm1_data.get("custom_fault_spns", {})
     if isinstance(faults_raw, dict):
@@ -166,6 +178,7 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
     return DM1Config(
         spn_encoding=spn_encoding,
         ports=ports,
+        source_addresses=tuple(source_addresses),
         custom_fault_spns=custom_fault_spns,
     )
 

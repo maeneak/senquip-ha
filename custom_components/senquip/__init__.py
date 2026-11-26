@@ -12,6 +12,7 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .can_profiles.loader import CANProfile, discover_profiles
@@ -31,6 +32,7 @@ from .const import (
     SensorStateClass,
     deserialize_port_configs,
 )
+from .fault_history import FAULT_HISTORY_STORE_VERSION, fault_history_store_key
 from .signal_keys import LEGACY_SELECTED_SENSORS_KEY, normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
@@ -381,3 +383,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     return unload_ok
 
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete persisted DM1 fault logs when the config entry is removed."""
+    device_id = entry.data.get(CONF_DEVICE_ID)
+    if not device_id:
+        return
+    for port_id in CAN_PORTS:
+        store = Store(hass, FAULT_HISTORY_STORE_VERSION, fault_history_store_key(device_id, port_id))
+        await store.async_remove()
