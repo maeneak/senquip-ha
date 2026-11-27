@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from custom_components.senquip.can_profiles.loader import CANProfile, discover_profiles
-from custom_components.senquip.can_protocols.j1939.decoder import J1939Decoder
+from custom_components.senquip.can_protocols.j1939.decoder import (
+    DM1SourceTracker,
+    J1939Decoder,
+)
 from custom_components.senquip.can_protocols.j1939.overlay import (
     DM1Config,
     parse_j1939_profile,
@@ -72,11 +75,12 @@ class TestDM1BAM:
         assert values[PREFIX + "red_stop"] == "Unknown"
         assert diagnostics[0]["dm1"]["multi_packet"] is True
 
-    def test_multi_packet_leaves_spn_fmi_oc_unchanged(self):
-        """0 means "no fault", so undecodable faults must not report SPN 0."""
+    def test_multi_packet_spn_fmi_unknown(self):
+        """0 means "no fault", so undecodable faults report SPN/FMI as Unknown."""
         values, _, _ = _decode([MAN_BAM_3_DTCS])
-        assert PREFIX + "active_spn" not in values
-        assert PREFIX + "active_fmi" not in values
+        assert values[PREFIX + "active_spn"] == "Unknown"
+        assert values[PREFIX + "active_fmi"] == "Unknown"
+        # Occurrence count is a numeric measurement: left unchanged
         assert PREFIX + "occurrence_count" not in values
 
     def test_single_dtc_bam_is_singular(self):
@@ -88,12 +92,15 @@ class TestDM1BAM:
         assert not any(key.startswith(PREFIX) for key in values)
         assert "dm1" not in diagnostics[0]
 
-    def test_latest_frame_per_source_wins(self):
-        values, _, _ = _decode([MAN_BAM_3_DTCS, MAN_NO_FAULT])
-        assert values[PREFIX + "active_fault"] == "No Active Fault"
-        assert values[PREFIX + "active_fault_count"] == 0
-        values, _, _ = _decode([MAN_NO_FAULT, MAN_BAM_3_DTCS])
+    @pytest.mark.parametrize(
+        "frames",
+        [[MAN_BAM_3_DTCS, MAN_NO_FAULT], [MAN_NO_FAULT, MAN_BAM_3_DTCS]],
+    )
+    def test_multi_packet_beats_single_frame_in_same_payload(self, frames):
+        """Payload order is slot order, not time, so precedence must not depend on it."""
+        values, _, _ = _decode(frames)
         assert values[PREFIX + "active_fault_count"] == 3
+        assert values[PREFIX + "red_stop"] == "Unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +149,17 @@ class TestMultiSourceDM1:
         values = run([EC1_BAM, GEARBOX_COOLANT_LE])
         assert values[PREFIX + "active_fault_count"] == 4
         assert values[PREFIX + "red_stop"] == "Unknown"
+
+    def test_payloads_without_dm1_age_sources(self):
+        """Sources age on every port payload, not only DM1-bearing ones."""
+        protocol, decoder = _man_runtime()
+        run = lambda frames: protocol.decode_runtime(frames, "can2", ALL_DM1, decoder)[0]
+        run([MAN_ESTOP_BE, GEARBOX_COOLANT_LE])
+        for _ in range(6):
+            run([{"id": 217056256, "data": "3FFFCD883927F4FF"}])  # EEC1 only
+        values = run([GEARBOX_COOLANT_LE])
+        assert values[PREFIX + "active_fault_count"] == 1
+        assert values[PREFIX + "protect_lamp"] == "Off"
 
     def test_source_dropped_after_missed_payloads(self):
         protocol, decoder = _man_runtime()
@@ -220,21 +238,72 @@ class TestPerSourceEncoding:
         assert dm1.source_addresses == (0, 39)
         assert dm1.spn_encoding == "big_endian"
 
-    def test_all_invalid_source_addresses_disable_big_endian(self):
-        """An empty filter means "all", so an all-invalid list must not widen it."""
+    @pytest.mark.parametrize("sources", [["0x00"], 0, "0x27", []])
+    def test_unusable_source_addresses_match_no_source(self, sources):
+        """A given-but-unusable filter must never widen to every source."""
         profile = CANProfile(
-            filename="hex.json",
-            name="Hex",
+            filename="bad.json",
+            name="Bad",
             base_protocol="j1939",
             description="",
             protocol_data={"j1939": {"dm1": {
                 "spn_encoding": "big_endian",
-                "source_addresses": ["0x00"],
+                "source_addresses": sources,
+                "custom_fault_spns": {"520198": "Emergency Stop"},
             }}},
         )
         _, _, dm1 = parse_j1939_profile(profile)
-        assert dm1.spn_encoding == "little_endian"
-        assert J1939Decoder(dm1_config=dm1).is_dm1_big_endian("can2", 3) is False
+        assert dm1.source_addresses == ()
+        decoder = J1939Decoder(dm1_config=dm1)
+        assert decoder.is_dm1_big_endian("can2", 3) is False
+        assert decoder.get_dm1_custom_fault_spns("can2", 3) == {}
+
+    def test_omitted_source_addresses_match_all(self):
+        _, _, dm1 = parse_j1939_profile(CANProfile(
+            filename="all.json", name="All", base_protocol="j1939", description="",
+            protocol_data={"j1939": {"dm1": {"spn_encoding": "big_endian"}}},
+        ))
+        assert dm1.source_addresses is None
+        assert J1939Decoder(dm1_config=dm1).is_dm1_big_endian("can2", 3) is True
+
+    def test_custom_fault_names_only_for_profile_sources(self):
+        """A non-MAN ECU's proprietary SPN must not get a MAN fault name."""
+        # Gearbox at SA 0x03 sends proprietary SPN 520198 / FMI 2, little-endian
+        gearbox_520198 = {"id": 0x18FECA03, "data": "04FF06F0E201FFFF"}
+        _, diagnostics, _ = _decode([gearbox_520198])
+        assert diagnostics[0]["dm1"]["active_spn"] == 520198
+        assert "Emergency Stop" not in diagnostics[0]["dm1"]["active_fault"]
+        assert "Unknown SPN 520198" in diagnostics[0]["dm1"]["active_fault"]
+        # The MAN engine (SA 0x00) still gets the profile's name
+        _, diagnostics, _ = _decode([MAN_ESTOP_BE])
+        assert "Emergency Stop" in diagnostics[0]["dm1"]["active_fault"]
+
+
+# ---------------------------------------------------------------------------
+# DM1SourceTracker
+# ---------------------------------------------------------------------------
+
+class TestDM1SourceTracker:
+    def test_drops_after_more_than_max_missed(self):
+        tracker = DM1SourceTracker(max_missed=2, max_age=1e9)
+        tracker.update({1: {"id": 1}}, 0.0)
+        assert len(tracker.update({}, 1.0)) == 1
+        assert len(tracker.update({}, 2.0)) == 1
+        assert tracker.update({}, 3.0) == []
+
+    def test_drops_after_max_age(self):
+        """An ECU switched off overnight must not reappear in the next payload."""
+        tracker = DM1SourceTracker(max_missed=100, max_age=300.0)
+        tracker.update({1: {"id": 1}, 2: {"id": 2}}, 0.0)
+        reports = tracker.update({2: {"id": 2, "new": True}}, 8 * 3600.0)
+        assert reports == [{"id": 2, "new": True}]
+
+    def test_refresh_resets_counters(self):
+        tracker = DM1SourceTracker(max_missed=1, max_age=10.0)
+        tracker.update({1: {"v": 1}}, 0.0)
+        tracker.update({}, 5.0)
+        tracker.update({1: {"v": 2}}, 9.0)
+        assert tracker.update({}, 15.0) == [{"v": 2}]
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +326,17 @@ class TestFaultLogMultiPacket:
         [entry] = restored.entries
         assert entry["description"] == "4 Active Faults (details not decoded)"
         assert entry["count"] == 1
+
+    def test_multi_packet_beats_single_frame_in_fault_log(self):
+        from datetime import datetime, timezone
+        _, single, _ = _decode([MAN_NO_FAULT])
+        _, multi, _ = _decode([MAN_BAM_3_DTCS])
+        as_report = lambda diag: {"source_address": diag[0]["source_address"], **diag[0]["dm1"]}
+        for order in ([as_report(multi), as_report(single)], [as_report(single), as_report(multi)]):
+            log = DM1FaultLog()
+            log.observe(order, datetime(2026, 11, 27, tzinfo=timezone.utc))
+            assert [e["spn"] for e in log.entries] == [None]
+            assert log.active_count == 1
 
     def test_switch_to_multi_packet_keeps_existing_faults_active(self):
         """Going from 1 DTC to a BAM must not mark the known DTC as cleared."""

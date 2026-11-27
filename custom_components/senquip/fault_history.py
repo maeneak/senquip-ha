@@ -9,6 +9,8 @@ not rewrite state on every MQTT payload.
 A multi-packet DM1 (2+ DTCs, announced by a TP.CM BAM) cannot be reassembled
 from Senquip payloads, so it is logged as one entry per source with
 ``spn``/``fmi`` of None, active until that source sends a single-frame DM1.
+While a source is in multi-packet mode its individually known faults stay
+active (they cannot be confirmed either way) until a single frame settles them.
 """
 
 from __future__ import annotations
@@ -86,7 +88,9 @@ class DM1FaultLog:
         timestamp = now.isoformat()
 
         # A single-frame DM1 carries a source's complete active DTC list, so
-        # when one payload holds several frames from a source the last one wins.
+        # when one payload holds several frames from a source the last one wins,
+        # except that a multi-packet report beats a single frame (payload order
+        # is CAN-ID slot order, not time; see protocol.decode_runtime).
         latest_by_source: dict[int, Mapping[str, Any]] = {}
         for report in reports:
             source = report.get("source_address")
@@ -98,6 +102,9 @@ class DM1FaultLog:
             elif not isinstance(report.get("active_spn"), int) or not isinstance(
                 report.get("active_fmi"), int
             ):
+                continue
+            previous = latest_by_source.get(source)
+            if previous is not None and previous.get("multi_packet") and not report.get("multi_packet"):
                 continue
             latest_by_source[source] = report
 

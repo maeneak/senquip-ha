@@ -54,8 +54,11 @@ DM1_LAMP_ON = 0b01
 # All 19 SPN bits set — sent by some ECUs in place of SPN 0 when no DTC is active
 DM1_SPN_NOT_AVAILABLE = 0x7FFFF
 
-# A DM1 source missing from this many consecutive DM1-bearing payloads is dropped
+# A DM1 source is dropped from the port's combined values once it has been
+# missing from more than this many consecutive port payloads, or for longer
+# than this many seconds (e.g. the ECU was switched off)
 DM1_SOURCE_MAX_MISSED_PAYLOADS = 5
+DM1_SOURCE_MAX_AGE = 300.0
 
 
 def dm1_fault_count_text(count: int, suffix: str = "") -> str:
@@ -73,23 +76,38 @@ class DM1SourceTracker:
     stops port-level values flapping between payloads.
     """
 
-    def __init__(self, max_missed: int = DM1_SOURCE_MAX_MISSED_PAYLOADS) -> None:
+    def __init__(
+        self,
+        max_missed: int = DM1_SOURCE_MAX_MISSED_PAYLOADS,
+        max_age: float = DM1_SOURCE_MAX_AGE,
+    ) -> None:
         self._max_missed = max_missed
+        self._max_age = max_age
         self._reports: dict[int, dict] = {}
         self._missed: dict[int, int] = {}
+        self._last_seen: dict[int, float] = {}
 
-    def update(self, current: dict[int, dict]) -> list[dict]:
-        """Merge one payload's reports and return the latest report per source."""
+    def update(self, current: dict[int, dict], now: float) -> list[dict]:
+        """Merge one port payload's reports and return the latest per source.
+
+        Call for every payload on the port (``current`` may be empty) so that
+        sources age out. ``now`` is a monotonic time in seconds.
+        """
         for source in list(self._reports):
             if source in current:
                 continue
             self._missed[source] += 1
-            if self._missed[source] > self._max_missed:
+            if (
+                self._missed[source] > self._max_missed
+                or now - self._last_seen[source] > self._max_age
+            ):
                 del self._reports[source]
                 del self._missed[source]
+                del self._last_seen[source]
         for source, report in current.items():
             self._reports[source] = report
             self._missed[source] = 0
+            self._last_seen[source] = now
         return list(self._reports.values())
 
 
@@ -327,28 +345,39 @@ class J1939Decoder:
             return None
         return (size - 2) // 4
 
-    def is_dm1_big_endian(self, port: str, source_address: int | None = None) -> bool:
-        """Check if DM1 SPN encoding should be big-endian for a port and source.
+    def _dm1_config_applies(self, port: str, source_address: int | None) -> bool:
+        """Whether the profile's DM1 options apply to a port and source.
 
-        Empty ``ports`` / ``source_addresses`` in the profile mean "all".
+        Empty ``ports`` means every port; ``source_addresses`` of None means
+        every source. An unknown source (None) is not filtered.
         """
         if self._dm1_config is None:
             return False
-        if self._dm1_config.spn_encoding != "big_endian":
-            return False
         if self._dm1_config.ports and port not in self._dm1_config.ports:
             return False
-        if (
-            self._dm1_config.source_addresses
-            and source_address is not None
-            and source_address not in self._dm1_config.source_addresses
-        ):
+        sources = self._dm1_config.source_addresses
+        if sources is not None and source_address is not None and source_address not in sources:
             return False
         return True
 
-    def get_dm1_custom_fault_spns(self) -> dict[int, str]:
-        """Return the custom fault SPN names from DM1 config."""
+    def is_dm1_big_endian(self, port: str, source_address: int | None = None) -> bool:
+        """Check if DM1 SPN encoding should be big-endian for a port and source."""
+        if self._dm1_config is None or self._dm1_config.spn_encoding != "big_endian":
+            return False
+        return self._dm1_config_applies(port, source_address)
+
+    def get_dm1_custom_fault_spns(
+        self, port: str | None = None, source_address: int | None = None
+    ) -> dict[int, str]:
+        """Return the profile's proprietary fault SPN names for a port and source.
+
+        Proprietary SPNs (520192+) overlap between manufacturers, so the names
+        only apply where the profile's DM1 options do. With no port given the
+        names are returned unfiltered.
+        """
         if self._dm1_config is None:
+            return {}
+        if port is not None and not self._dm1_config_applies(port, source_address):
             return {}
         return self._dm1_config.custom_fault_spns
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, SensorDeviceClass, SensorMeta, SensorStateClass
@@ -111,8 +112,12 @@ def _combine_dm1_reports(port_id: str, reports: list[dict[str, Any]]) -> dict[st
         values[prefix + "active_spn"] = 0
         values[prefix + "active_fmi"] = 0
         values[prefix + "occurrence_count"] = 0
-    # else: faults are active but none could be decoded (multi-packet only).
-    # Leave SPN/FMI/OC unchanged rather than report 0, which means "no fault".
+    else:
+        # Faults are active but none could be decoded (multi-packet only).
+        # 0 would mean "no fault", so report SPN/FMI as Unknown. Occurrence
+        # count is a measurement (numeric only) and is left unchanged.
+        values[prefix + "active_spn"] = "Unknown"
+        values[prefix + "active_fmi"] = "Unknown"
     return values
 
 
@@ -261,7 +266,7 @@ class J1939CANProtocol:
         values: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
         has_valid_data = False
-        # Latest DM1 report per source address (frames are in payload order)
+        # DM1 report per source address in this payload (multi-packet wins)
         dm1_by_source: dict[int, dict[str, Any]] = {}
 
         for frame in frames:
@@ -294,7 +299,7 @@ class J1939CANProtocol:
                 dm1 = decoder.decode_dm1(dm1_bytes, big_endian_spn=big_endian)
                 if dm1 is not None:
                     has_valid_data = True
-                    custom_faults = decoder.get_dm1_custom_fault_spns()
+                    custom_faults = decoder.get_dm1_custom_fault_spns(port_id, source)
                     fault_desc = decoder.get_fault_description(
                         dm1.active_spn,
                         dm1.active_fmi,
@@ -319,7 +324,13 @@ class J1939CANProtocol:
                     frame_diag["pgn_name"] = "DM1 - Active DTCs"
                     frame_diag["pgn_acronym"] = "DM1"
                     frame_diag["dm1"] = report
-                    dm1_by_source[source] = report
+                    # Payload order is CAN-ID slot order, not time order. If a
+                    # source sent both a single frame and a BAM this interval,
+                    # its state changed mid-interval; report the multi-packet
+                    # one (more faults) and let the next payload settle it.
+                    previous = dm1_by_source.get(source)
+                    if previous is None or not previous["multi_packet"]:
+                        dm1_by_source[source] = report
                 diagnostics.append(frame_diag)
                 continue
 
@@ -368,8 +379,9 @@ class J1939CANProtocol:
                     values[raw_key] = hex_data
             diagnostics.append(frame_diag)
 
+        # Age sources on every payload; publish only when this payload had DM1
+        reports = decoder.dm1_tracker.update(dm1_by_source, time.monotonic())
         if dm1_by_source:
-            reports = decoder.dm1_tracker.update(dm1_by_source)
             combined = _combine_dm1_reports(port_id, reports)
             for key, value in combined.items():
                 if key in selected_signals:

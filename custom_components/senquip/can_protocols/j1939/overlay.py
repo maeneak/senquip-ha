@@ -18,7 +18,8 @@ class DM1Config:
 
     spn_encoding: str = "little_endian"
     ports: tuple[str, ...] = ()
-    source_addresses: tuple[int, ...] = ()
+    # None = every source; a tuple (possibly empty) = only those sources
+    source_addresses: tuple[int, ...] | None = None
     custom_fault_spns: dict[int, str] = field(default_factory=dict)
 
 
@@ -155,23 +156,30 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
         ports_raw = []
     ports = tuple(str(item) for item in ports_raw)
 
-    sources_raw = dm1_data.get("source_addresses", [])
-    if not isinstance(sources_raw, list):
-        _LOGGER.warning("Invalid dm1.source_addresses in %s: must be a list", profile_name)
-        sources_raw = []
-    source_addresses: list[int] = []
-    for item in sources_raw:
-        if isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 255:
-            source_addresses.append(item)
+    # A filter that was given but is unusable matches no source, so a typo
+    # can never widen big-endian decoding to every ECU on the bus.
+    source_addresses: tuple[int, ...] | None = None
+    if "source_addresses" in dm1_data:
+        sources_raw = dm1_data["source_addresses"]
+        valid: list[int] = []
+        if isinstance(sources_raw, list):
+            for item in sources_raw:
+                if isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 255:
+                    valid.append(item)
+                else:
+                    _LOGGER.warning(
+                        "Invalid dm1.source_addresses entry in %s: %s", profile_name, item
+                    )
         else:
-            _LOGGER.warning("Invalid dm1.source_addresses entry in %s: %s", profile_name, item)
-    if sources_raw and not source_addresses and spn_encoding != "little_endian":
-        # An empty filter means "all sources"; don't widen a filter that was given
-        _LOGGER.warning(
-            "No valid dm1.source_addresses in %s; using little_endian DM1 encoding",
-            profile_name,
-        )
-        spn_encoding = "little_endian"
+            _LOGGER.warning(
+                "Invalid dm1.source_addresses in %s: must be a list of integers", profile_name
+            )
+        if not valid:
+            _LOGGER.warning(
+                "No valid dm1.source_addresses in %s; its DM1 options apply to no source",
+                profile_name,
+            )
+        source_addresses = tuple(valid)
 
     custom_fault_spns: dict[int, str] = {}
     faults_raw = dm1_data.get("custom_fault_spns", {})
@@ -185,7 +193,7 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
     return DM1Config(
         spn_encoding=spn_encoding,
         ports=ports,
-        source_addresses=tuple(source_addresses),
+        source_addresses=source_addresses,
         custom_fault_spns=custom_fault_spns,
     )
 

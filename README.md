@@ -21,7 +21,8 @@ The integration subscribes to MQTT telemetry, supports protocol-based CAN decodi
 - J1939 DM1 fault reporting:
   - Active fault, active fault count, lamp status (Protect / Amber Warning / Red Stop / MIL) and SPN/FMI sensors
   - DM1 from several ECUs on one port is combined: each lamp shows the most severe state (Active > Unknown > Off > Not Available) and the fault text lists every decoded fault
-  - Multi-packet DM1 (2+ faults, sent as a BAM transfer) is detected and reported as "N Active Faults (details not decoded)". A Senquip payload holds one frame per CAN ID, so the individual DTCs cannot be reassembled; that ECU's lamps show `Unknown`
+  - Multi-packet DM1 (2+ faults, sent as a BAM transfer) is detected and reported as "N Active Faults (details not decoded)". A Senquip payload holds one frame per CAN ID, so the individual DTCs cannot be reassembled; that ECU's lamps show `Unknown`, Active SPN/FMI show `Unknown`, and Occurrence Count keeps its last value. In the fault history, that ECU's previously known faults stay active until it sends a single-frame DM1 again
+  - An ECU missing from a payload keeps its last DM1 state for up to 5 payloads or 5 minutes, so the port values do not flicker when a frame is not captured
   - `DM1 Fault History` sensor per J1939 port with DM1 signals selected: persistent log of past faults (SPN, FMI, description, lamps, first seen, last activated, cleared, activation count). Saved to `.storage` about a second after each change, so it survives restarts and power loss. Keeps up to 25 entries: the least recently active cleared faults are dropped first and active faults are never dropped
 - Profile overlays for CAN protocols via `custom_components/senquip/can_profiles/`
 - Options flow to rediscover and reconfigure protocols/signals without removing the integration
@@ -114,8 +115,8 @@ The optional `dm1` section configures manufacturer-specific DM1 decoding:
 
 - `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (MAN)
 - `ports`: limit `spn_encoding` to these ports (empty = all ports using the profile)
-- `source_addresses`: limit `spn_encoding` to DM1 from these J1939 source addresses (empty = all), so other ECUs on the same bus keep standard decoding. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. If every entry is invalid, big-endian decoding is turned off rather than applied to all sources
-- `custom_fault_spns`: names for proprietary fault SPNs
+- `source_addresses`: limit `spn_encoding` to DM1 from these J1939 source addresses (empty = all), so other ECUs on the same bus keep standard decoding. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. If `source_addresses` is present but not a list of integers 0-255, the DM1 options apply to no source rather than all of them
+- `custom_fault_spns`: names for proprietary fault SPNs. Only applied to DM1 from the ports and sources above, since proprietary SPNs overlap between manufacturers
 
 ### Current bundled profile
 
