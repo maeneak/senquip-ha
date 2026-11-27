@@ -58,7 +58,7 @@ class TestJ1939Overlay:
         pgn_db, _, dm1_config = parse_j1939_profile(profile)
         assert pgn_db[65271].spns == (167, 168)
         assert dm1_config is not None
-        assert dm1_config.spn_encoding == "big_endian"
+        assert dm1_config.spn_encoding == "little_endian"
 
     def test_merge_overrides_base_database(self):
         repo_root = Path(__file__).resolve().parents[1]

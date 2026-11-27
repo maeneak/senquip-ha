@@ -13,6 +13,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -26,6 +27,7 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_SELECTED_SIGNALS,
     DOMAIN,
+    EVENT_DM1_FAULT,
     KNOWN_INTERNAL_SENSORS,
     PORT_DISPLAY_NAMES,
     SensorMeta,
@@ -33,8 +35,12 @@ from .const import (
 from .fault_history import (
     FAULT_HISTORY_SAVE_DELAY,
     FAULT_HISTORY_STORE_VERSION,
+    LEGACY_BIG_ENDIAN_PORTS,
+    LEGACY_BIG_ENDIAN_PROFILE,
+    LEGACY_BIG_ENDIAN_SOURCES,
     DM1FaultLog,
     fault_history_store_key,
+    legacy_fault_history_store_key,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -216,6 +222,8 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     ``faults`` attribute. The log is saved to its own .storage file shortly
     after every change so it survives restarts and power loss.
     ``RestoreEntity`` is kept only to migrate logs saved by 0.6.0.
+
+    Each fault becoming active or clearing fires an ``EVENT_DM1_FAULT`` event.
     """
 
     _attr_has_entity_name = True
@@ -234,6 +242,8 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self._port_id = port_id
+        self._device_id = device_id
+        self._device_name = device_name
         signal_key = f"can.{port_id}.j1939.dm1.fault_history"
         self._attr_unique_id = f"{device_id}_{signal_key}"
         self._attr_name = "DM1 Fault History"
@@ -256,20 +266,74 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         if stored is not None:
             self._log = DM1FaultLog.from_dict(stored)
         else:
-            # Migrate a log that 0.6.0 kept in restore-state data
-            last_extra = await self.async_get_last_extra_data()
-            if last_extra is not None:
-                self._log = DM1FaultLog.from_dict(last_extra.as_dict())
-                self._schedule_save()
+            await self._migrate_legacy_log()
         await super().async_added_to_hass()
         # Catch a payload that arrived before this entity was listening
         if self._observe_latest():
             self._schedule_save()
+            self.async_write_ha_state()
+            self._fire_transitions()
+
+    async def _migrate_legacy_log(self) -> None:
+        """Load a log saved by an older version, correct its SPNs and save it.
+
+        0.7.0 kept the log under the legacy store key, 0.6.0 in restore-state
+        data. Both are format 1 (big-endian SPNs on the MAN profile's port).
+        The result is saved to the current key at once, so the correction can
+        never be applied twice.
+        """
+        legacy = await Store(
+            self.coordinator.hass,
+            FAULT_HISTORY_STORE_VERSION,
+            legacy_fault_history_store_key(self._device_id, self._port_id),
+        ).async_load()
+        if legacy is not None:
+            self._log = DM1FaultLog.from_dict(legacy)
+            self._convert_big_endian_spns(all_sources=False)
+        else:
+            last_extra = await self.async_get_last_extra_data()
+            if last_extra is None:
+                return
+            self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+            # 0.6.0 had no source filter: every source on the port was big-endian
+            self._convert_big_endian_spns(all_sources=True)
+        await self._store.async_save(self._log.as_dict())
 
     async def async_will_remove_from_hass(self) -> None:
         """Flush any pending save so it cannot land after the file is deleted."""
         await super().async_will_remove_from_hass()
         await self._store.async_save(self._log.as_dict())
+
+    def _convert_big_endian_spns(self, all_sources: bool) -> bool:
+        """Correct SPNs that 0.6.0-0.7.0 decoded big-endian.
+
+        Only the bundled MAN profile ever used big-endian, with DM1 options
+        fixed in those releases: on can2, for every source in 0.6.0
+        (``all_sources``, a log still in restore-state data) and for the MAN
+        source addresses in 0.7.0. The decision uses those fixed rules, not
+        today's decoder, so it holds even if the profile fails to load. A
+        0.7.0 store may also hold 0.6.0 entries; they get the 0.7.0 rule.
+        """
+        port = self._port_id
+        if (
+            port not in LEGACY_BIG_ENDIAN_PORTS
+            or LEGACY_BIG_ENDIAN_PROFILE not in self.coordinator.get_port_profile_names(port)
+        ):
+            return False
+        runtime = self.coordinator.get_can_runtime(port)
+        decoder = runtime[1] if runtime is not None else None
+
+        def describe(source: int, spn: int, fmi: int) -> str:
+            if decoder is None:
+                return f"SPN {spn} (FMI {fmi})"
+            return decoder.get_fault_description(
+                spn, fmi, decoder.get_dm1_custom_fault_spns(port, source)
+            )
+
+        return self._log.convert_big_endian_spns(
+            lambda source: all_sources or source in LEGACY_BIG_ENDIAN_SOURCES,
+            describe,
+        )
 
     def _schedule_save(self) -> None:
         """Write the log to .storage after a short delay.
@@ -285,6 +349,31 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
             datetime.now(timezone.utc),
         )
 
+    def _fire_transitions(self) -> None:
+        """Fire an event for each fault that became active or cleared."""
+        transitions = self._log.pop_transitions()
+        if not transitions:
+            return
+        registry_entry = getattr(self, "registry_entry", None)
+        ha_device_id = registry_entry.device_id if registry_entry else None
+        device_name = self._device_name
+        if ha_device_id:
+            device = dr.async_get(self.coordinator.hass).async_get(ha_device_id)
+            if device is not None:
+                device_name = device.name_by_user or device.name or device_name
+        for transition in transitions:
+            self.coordinator.hass.bus.async_fire(
+                EVENT_DM1_FAULT,
+                {
+                    **transition,
+                    "device_id": ha_device_id,
+                    "device_name": device_name,
+                    "senquip_id": self._device_id,
+                    "port": self._port_id,
+                    "entity_id": getattr(self, "entity_id", None),
+                },
+            )
+
     @property
     def available(self) -> bool:
         """The log is history, so it stays available while the device is offline."""
@@ -295,7 +384,9 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         """Update the log; write state only when it changed."""
         if self._observe_latest():
             self._schedule_save()
+            # State first, so automations triggered by the event read the new log
             self.async_write_ha_state()
+            self._fire_transitions()
 
     @property
     def native_value(self) -> StateType:

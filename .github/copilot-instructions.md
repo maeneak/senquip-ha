@@ -94,11 +94,15 @@ J1939 overlay validation rules:
 DM1 (PGN 65226) is decoded separately from normal SPNs.
 
 - Standard little-endian DM1 supported
-- MAN big-endian DM1 supported via profile `dm1.spn_encoding`, optionally limited by `dm1.ports` and `dm1.source_addresses`. The MAN engines on the vessel transmit from SA 0x00, not the 0x27 in the MAN doc, so the MAN profile lists 0x00, 0x01 and 0x27 (engine #1, engine #2, MCS). `ports` / `source_addresses` omitted or null = all; a given list = only those (empty or invalid = none). `custom_fault_spns` use the same port/source filter
+- Big-endian DM1 SPN packing is supported via profile `dm1.spn_encoding`, optionally limited by `dm1.ports` and `dm1.source_addresses`. The MAN PDF example implies big-endian, but live MAN D2862 DM1 is standard little-endian (a captured Red Stop fault `D0FF0AF0EE01FFFF` is SPN 520202 / FMI 14 "Engine Start Prevented" read LE, and a meaningless SPN 22407 read BE), so the MAN profile uses `little_endian` and keeps `dm1` only to scope `custom_fault_spns`. The MAN engines on the vessel transmit from SA 0x00, not the 0x27 in the MAN doc, so the MAN profile lists 0x00, 0x01 and 0x27 (engine #1, engine #2, MCS). `ports` / `source_addresses` omitted or null = all; a given list = only those (empty or invalid = none). `custom_fault_spns` use the same port/source filter
 - Lamp byte is four 2-bit fields, LSB first: Protect, Amber, Red Stop, MIL. `00`=Off, `01`=Active, `10`/`11`=Not Available
 - A Senquip payload holds one frame per CAN ID, so multi-packet (BAM/TP) DM1 cannot be reassembled. A TP.CM BAM announcing PGN 65226 is detected and reported as a DTC count (`J1939Decoder.decode_dm1_bam`); that source's lamps are `Unknown`
 - `decode_runtime` takes one DM1 report per source per payload (multi-packet beats a single frame, since payload order is CAN-ID slot order, not time), merges it into the per-port `decoder.dm1_tracker` (`DM1SourceTracker`, which keeps absent sources for up to 5 port payloads and is reset via `CANProtocol.reset_runtime_state` when the device goes offline or the port becomes unavailable), then `_combine_dm1_reports` produces the port-level `dm1.*` values (worst lamp state, all faults listed, `active_fault_count`; `No DM1 Received` when every source has aged out)
 - `fault_history.py` (`DM1FaultLog`) keeps a per-port fault log keyed by (source address, SPN, FMI); a multi-packet DM1 is one entry per source with `spn`/`fmi` None. The coordinator exposes each payload's DM1 reports via `get_dm1_reports(port)`, and `SenquipDM1FaultHistorySensor` feeds them into the log and saves it with HA `Store` (`fault_history_store_key`). It is created automatically for J1939 ports with any `dm1.` signal selected. `async_remove_entry` deletes the stores
+- `DM1FaultLog.observe` records each activation/clear as a transition; `SenquipDM1FaultHistorySensor` pops them (`pop_transitions`) and fires `EVENT_DM1_FAULT` (`senquip_dm1_fault`) with the entry snapshot plus `status`, `device_id`/`device_name` (port sub-device, user rename preferred), `senquip_id`, `port` and `entity_id`. Lamp/description changes on an active fault are not transitions
+- 0.8.0 saves fault logs under `fault_history_store_key` (`senquip.dm1_fault_log.*`). When that store is missing, `_migrate_legacy_log` loads the 0.7.0 store (`legacy_fault_history_store_key`, `senquip.dm1_fault_history.*`) or 0.6.0 restore-state data, corrects it, and saves it to the new key at once, so the correction can never run twice (crash, downgrade/upgrade). Correction uses the fixed 0.6.0/0.7.0 rules (`LEGACY_BIG_ENDIAN_PROFILE` on `LEGACY_BIG_ENDIAN_PORTS`, sources `LEGACY_BIG_ENDIAN_SOURCES`, every source for a 0.6.0 log), not the current decoder: those SPNs are re-read little-endian (`big_endian_spn_to_little_endian`) and re-described, without firing events. The legacy store is left for a downgrade and deleted by `async_remove_entry`
+- MAN gearbox status (PGN 65308 byte 1) is three 2-bit flags; with no flag set it decodes as `Not Reported` (seen on the port engine at all times and on starboard after an ECU power cycle until the first shift)
+- EEC1 also carries `Engine Starter Mode` (SPN 1675, enum) and `Source Address of Controlling Device` (SPN 1483, no state class). The MAN engines report starter mode 1 (starter active, gear not engaged) at standstill with the key on
 
 ## Tests
 
@@ -121,6 +125,7 @@ Current notable tests:
 - `tests/test_raw_protocol.py`
 - `tests/test_fault_history.py`
 - `tests/test_dm1_followups.py`
+- `tests/test_engine_diagnostics.py`
 
 Tests run without Home Assistant installed by using stubs in:
 

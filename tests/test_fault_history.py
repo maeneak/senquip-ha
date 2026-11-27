@@ -9,7 +9,11 @@ import pytest
 
 from custom_components.senquip import SenquipDataCoordinator, async_remove_entry
 from custom_components.senquip.can_profiles.loader import discover_profiles
-from custom_components.senquip.fault_history import DM1FaultLog, fault_history_store_key
+from custom_components.senquip.fault_history import (
+    DM1FaultLog,
+    fault_history_store_key,
+    legacy_fault_history_store_key,
+)
 from custom_components.senquip.sensor import (
     SenquipDM1FaultHistorySensor,
     async_setup_entry,
@@ -235,7 +239,7 @@ def _payload(can2_dm1):
 class TestCoordinatorDM1Reports:
     def test_reports_collected_without_dm1_signals_selected(self):
         _, coord = _coordinator(["can.can2.j1939.spn190"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         [report] = coord.get_dm1_reports("can2")
         assert report["source_address"] == MAN_SA
         assert report["active_spn"] == 520198
@@ -245,7 +249,7 @@ class TestCoordinatorDM1Reports:
 
     def test_reports_reset_when_payload_has_no_dm1(self):
         _, coord = _coordinator(["can.can2.j1939.spn190"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         coord._parse_payload({"deviceid": "test_dev", "can2": [{"id": 217056256, "data": "3FFFCD883927F4FF"}]})
         assert coord.get_dm1_reports("can2") == []
 
@@ -267,7 +271,7 @@ class TestFaultHistorySensor:
         assert sensor.native_value == 0
         assert sensor.available is True
 
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         assert sensor.native_value == 1
         attrs = sensor.extra_state_attributes
@@ -288,7 +292,7 @@ class TestFaultHistorySensor:
         coord._parse_payload(_payload("C0FF00000000FFFF"))
         sensor._handle_coordinator_update()
         assert sensor.state_writes == 0
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         sensor._handle_coordinator_update()
         assert sensor.state_writes == 1
@@ -298,7 +302,7 @@ class TestFaultHistorySensor:
 
     def test_payload_before_entity_added_is_logged(self):
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.extra_state_attributes["active_faults"] == 1
@@ -309,7 +313,7 @@ class TestFaultHistorySensor:
         coord._parse_payload(_payload("C0FF00000000FFFF"))
         original._handle_coordinator_update()
         assert original._store.save_calls == 0  # nothing changed, nothing saved
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         original._handle_coordinator_update()
         assert original._store.save_calls == 1
         assert original._store.key == fault_history_store_key("test_dev", "can2")
@@ -324,16 +328,25 @@ class TestFaultHistorySensor:
         assert restored.extra_state_attributes["faults"] == original.extra_state_attributes["faults"]
 
     def test_migrates_log_from_restore_state(self):
-        """A log kept in restore-state data by 0.6.0 is moved into .storage."""
+        """A log kept in restore-state data by 0.6.0 is moved into .storage.
+
+        0.6.0 decoded the MAN engine big-endian, so the E-stop (bytes 06 F0 E2)
+        was logged as SPN 14215; the migration also corrects it.
+        """
         legacy = DM1FaultLog()
-        legacy.observe([EMERGENCY_STOP], T0)
+        legacy.observe([_report(spn=14215, fmi=2, oc=1, desc="SPN 14215: Unknown SPN 14215")], T0)
+        legacy_data = legacy.as_dict()
+        legacy_data.pop("format")  # 0.6.0 saved no format marker
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
-        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy.as_dict()))
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy_data))
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.native_value == 1
         sensor._store.flush()
-        assert Store.saved[fault_history_store_key("test_dev", "can2")] == legacy.as_dict()
+        [entry] = Store.saved[fault_history_store_key("test_dev", "can2")]["entries"]
+        assert entry["spn"] == 520198
+        assert entry["description"].startswith("SPN 520198: Emergency Stop")
+        assert entry["first_seen"] == legacy.entries[0]["first_seen"]
 
     def test_update_during_load_does_not_overwrite_history(self):
         """A payload landing while .storage is read must not save the empty log."""
@@ -363,7 +376,7 @@ class TestFaultHistorySensor:
         """Removal writes immediately so no delayed save lands after deletion."""
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         key = fault_history_store_key("test_dev", "can2")
         assert key not in Store.saved  # still pending
@@ -409,6 +422,7 @@ class TestRemoveEntry:
         Store.saved[fault_history_store_key("test_dev", "can1")] = {"entries": []}
         Store.saved[fault_history_store_key("test_dev", "can2")] = {"entries": []}
         Store.saved[fault_history_store_key("other_dev", "can2")] = {"entries": []}
+        Store.saved[legacy_fault_history_store_key("test_dev", "can2")] = {"entries": []}
         entry = ConfigEntry(data={"device_id": "test_dev"})
         asyncio.run(async_remove_entry(MagicMock(), entry))
         assert list(Store.saved) == [fault_history_store_key("other_dev", "can2")]

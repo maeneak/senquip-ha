@@ -32,7 +32,11 @@ from .const import (
     SensorStateClass,
     deserialize_port_configs,
 )
-from .fault_history import FAULT_HISTORY_STORE_VERSION, fault_history_store_key
+from .fault_history import (
+    FAULT_HISTORY_STORE_VERSION,
+    fault_history_store_key,
+    legacy_fault_history_store_key,
+)
 from .signal_keys import LEGACY_SELECTED_SENSORS_KEY, normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +98,11 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def get_can_runtime(self, port_id: str) -> tuple[Any, Any] | None:
         """Return protocol/decoder tuple for a CAN port if available."""
         return self._can_runtime.get(port_id)
+
+    def get_port_profile_names(self, port_id: str) -> list[str]:
+        """Return the profile file names configured for a port."""
+        config = self._port_configs.get(port_id)
+        return list(config.profiles) if config is not None else []
 
     def get_dm1_reports(self, port_id: str) -> list[dict[str, Any]]:
         """Return the DM1 frames decoded on a port in the latest payload.
@@ -395,10 +404,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if not device_id:
         return
     for port_id in CAN_PORTS:
-        store = Store(
-            hass,
-            FAULT_HISTORY_STORE_VERSION,
+        for key in (
             fault_history_store_key(device_id, port_id),
-            atomic_writes=True,
-        )
-        await store.async_remove()
+            legacy_fault_history_store_key(device_id, port_id),
+        ):
+            await Store(hass, FAULT_HISTORY_STORE_VERSION, key, atomic_writes=True).async_remove()

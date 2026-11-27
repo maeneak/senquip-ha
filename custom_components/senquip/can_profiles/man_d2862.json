@@ -1,7 +1,7 @@
 {
   "name": "MAN D2862-LE466",
   "base_protocol": "j1939",
-  "description": "MAN V12 marine diesel engine overrides for MAN-specific byte layouts, proprietary PGN 65308, and DM1 big-endian DTC encoding",
+  "description": "MAN V12 marine diesel engine overrides for MAN-specific byte layouts, proprietary PGN 65308, and MAN proprietary DM1 fault names",
   "protocol_data": {
     "j1939": {
       "pgns": {
@@ -180,6 +180,7 @@
           "offset": 0,
           "unit": "",
           "states": {
+            "0": "Not Reported",
             "1": "Neutral",
             "4": "Forward",
             "16": "Reverse"
@@ -235,7 +236,7 @@
         }
       },
       "dm1": {
-        "spn_encoding": "big_endian",
+        "spn_encoding": "little_endian",
         "ports": [
           "can2"
         ],

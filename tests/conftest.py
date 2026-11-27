@@ -84,6 +84,7 @@ _ha_helpers_coordinator.CoordinatorEntity = ha_stubs.CoordinatorEntity
 
 _ha_helpers_device = ModuleType("homeassistant.helpers.device_registry")
 _ha_helpers_device.DeviceInfo = ha_stubs.DeviceInfo
+_ha_helpers_device.async_get = ha_stubs.device_registry_async_get
 
 _ha_helpers_platform = ModuleType("homeassistant.helpers.entity_platform")
 _ha_helpers_platform.AddEntitiesCallback = ha_stubs.AddEntitiesCallback

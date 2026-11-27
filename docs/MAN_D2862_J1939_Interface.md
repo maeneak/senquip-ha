@@ -202,6 +202,8 @@ This is a **MAN-proprietary PGN** not in the J1939 standard. All SPNs are MAN-sp
 | 5–6 | Gearbox Reverse Position | 00=not reverse, 01=reverse, 1x=invalid |
 | 7–8 | — | Default `11` (not used) |
 
+Observed in service (2026-11-27): starboard `C1` (neutral) and `C4` (forward); after an ECU power cycle starboard reported `C0` (no flag set) at idle until the first shift. The port engine reports `C0` at all times, including in gear. The profile decodes `C0` as `Not Reported`.
+
 #### Byte 2 — Engine Start/Stop (bit-level)
 
 | Bits | Name | Values |
@@ -242,6 +244,8 @@ CAN ID: `0x1CFECA27`, 8 bytes.
 | 10/11 | — | — | — |
 
 ### DM1 SPN Encoding — CRITICAL NOTE
+
+> **Resolved (2026-11-27): the engines in service use the standard little-endian layout.** A Red Stop fault captured from the starboard D2862 (`D0 FF 0A F0 EE 01 FF FF`) reads as SPN 520202 / FMI 14 "Engine Start Prevented" with the standard formula, an exact match (including the FMI) to the MAN fault list below. Read big-endian it is SPN 22407, which is not a MAN SPN. The PDF example analysed below does not reflect the live engines, and the bundled profile now uses `little_endian`.
 
 The MAN PDF describes the DTC SPN byte layout and provides worked examples. Verification of the examples reveals that the **SPN is packed MSByte-first (big-endian)**, not LSByte-first as in the standard J1939-73 little-endian formula:
 
@@ -352,7 +356,7 @@ All faults transmit with `FMI=2` for sensor failure OR the FMI listed under Warn
 | 65254 (TD) | SPN 962 (Day) byte | Byte 4 | **Byte 5** | Maybe — verify |
 | 65254 (TD) | SPN 963 (Month) byte | Byte 5 | **Byte 4** | Maybe — verify |
 | 65272 (TF) | SPN 127 resolution | 4 kPa/bit | **160 mbar/bit (16 kPa/bit)** | Maybe — verify |
-| 65226 (DM1) | SPN byte order in DTC | Little-endian | **Big-endian** | Needs investigation |
+| 65226 (DM1) | SPN byte order in DTC | Little-endian | PDF example big-endian; **live engines little-endian** | No (resolved 2026-11-27) |
 | 65308 | Entire PGN | Not in standard | **MAN-proprietary** | Profile-only |
 
 ---

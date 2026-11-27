@@ -11,14 +11,30 @@ from Senquip payloads, so it is logged as one entry per source with
 ``spn``/``fmi`` of None, active until that source sends a single-frame DM1.
 While a source is in multi-packet mode its individually known faults stay
 active (they cannot be confirmed either way) until a single frame settles them.
+
+Each fault becoming active or clearing is also recorded as a transition, which
+the fault history sensor fires as a Home Assistant event.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 MAX_FAULT_LOG_ENTRIES = 25
+
+# Saved log format, informational. 1 (0.6.0-0.7.0, legacy store key): SPNs
+# from the MAN profile's sources were decoded big-endian. 2 (0.8.0): every SPN
+# is decoded little-endian. Which store a log is in decides whether it needs
+# correcting, since older versions drop this field when they save.
+FAULT_LOG_FORMAT = 2
+
+# Where 0.6.0-0.7.0 decoded DM1 big-endian: the bundled MAN profile's DM1
+# options (fixed in those releases), on its port, for its source addresses
+# (0.7.0; 0.6.0 had no source filter)
+LEGACY_BIG_ENDIAN_PROFILE = "man_d2862.json"
+LEGACY_BIG_ENDIAN_PORTS = frozenset({"can2"})
+LEGACY_BIG_ENDIAN_SOURCES = frozenset({0x00, 0x01, 0x27})
 
 # Home Assistant Store (.storage) settings for the persisted log
 FAULT_HISTORY_STORE_VERSION = 1
@@ -26,8 +42,31 @@ FAULT_HISTORY_SAVE_DELAY = 1  # seconds; batches bursts of changes into one writ
 
 
 def fault_history_store_key(device_id: str, port_id: str) -> str:
-    """Return the .storage key holding one port's fault log."""
+    """Return the .storage key holding one port's fault log (0.8.0+)."""
+    return f"senquip.dm1_fault_log.{device_id}.{port_id}"
+
+
+def legacy_fault_history_store_key(device_id: str, port_id: str) -> str:
+    """Return the .storage key 0.7.0 used, holding format 1 logs.
+
+    0.8.0 reads it once when its own store is missing, corrects the SPNs and
+    saves to the new key, so a log can never be corrected twice (after a
+    crash before saving, or a downgrade and upgrade). It is left in place for
+    a downgrade and deleted with the config entry.
+    """
     return f"senquip.dm1_fault_history.{device_id}.{port_id}"
+
+
+def big_endian_spn_to_little_endian(spn: int) -> int:
+    """Re-read an SPN decoded big-endian as the standard little-endian value.
+
+    Big-endian read DTC bytes 3-5 as ``(b3 << 11) | (b4 << 3) | (b5 >> 5)``;
+    the standard layout is ``b3 | (b4 << 8) | ((b5 >> 5) << 16)``.
+    """
+    byte3 = (spn >> 11) & 0xFF
+    byte4 = (spn >> 3) & 0xFF
+    return byte3 | (byte4 << 8) | ((spn & 0x07) << 16)
+
 
 _LAMP_NAMES: dict[str, str] = {
     "protect": "Protect",
@@ -55,6 +94,7 @@ class DM1FaultLog:
     def __init__(self, max_entries: int = MAX_FAULT_LOG_ENTRIES) -> None:
         self._max_entries = max_entries
         self._entries: dict[_FaultKey, dict[str, Any]] = {}
+        self._transitions: list[dict[str, Any]] = []
 
     @property
     def entries(self) -> list[dict[str, Any]]:
@@ -68,6 +108,18 @@ class DM1FaultLog:
             reverse=True,
         )
         return [dict(entry, lamps=list(entry["lamps"])) for entry in ordered]
+
+    def pop_transitions(self) -> list[dict[str, Any]]:
+        """Return and forget faults that became active or cleared since the last call.
+
+        Each item is a snapshot of the log entry plus ``status`` ("active" or
+        "cleared"), in the order the changes were observed.
+        """
+        transitions, self._transitions = self._transitions, []
+        return transitions
+
+    def _record_transition(self, entry: Mapping[str, Any], status: str) -> None:
+        self._transitions.append(dict(entry, lamps=list(entry["lamps"]), status=status))
 
     @property
     def active_count(self) -> int:
@@ -146,10 +198,12 @@ class DM1FaultLog:
                     "last_activated": timestamp,
                     "cleared": None,
                 }
+                self._record_transition(self._entries[key], "active")
                 changed = True
                 continue
 
-            if not entry["active"]:
+            activated = not entry["active"]
+            if activated:
                 entry["active"] = True
                 entry["count"] += 1
                 entry["last_activated"] = timestamp
@@ -164,6 +218,8 @@ class DM1FaultLog:
                 if entry[field] != value:
                     entry[field] = value
                     changed = True
+            if activated:
+                self._record_transition(entry, "active")
 
         for key, entry in self._entries.items():
             if key[0] in multi_packet_sources and key[1] != _MULTI_PACKET:
@@ -171,10 +227,40 @@ class DM1FaultLog:
             if entry["active"] and key[0] in reporting_sources and key not in current:
                 entry["active"] = False
                 entry["cleared"] = timestamp
+                self._record_transition(entry, "cleared")
                 changed = True
 
         if changed:
             self._trim()
+        return changed
+
+    def convert_big_endian_spns(
+        self,
+        was_big_endian: Callable[[int], bool],
+        describe: Callable[[int, int, int], str],
+    ) -> bool:
+        """Re-key entries logged with big-endian SPN decoding (format 1 logs).
+
+        ``was_big_endian(source)`` says whether a source's DM1 was decoded
+        big-endian; ``describe(source, spn, fmi)`` gives the new description.
+        No transitions are recorded. Returns True if any entry changed.
+
+        Every entry is re-keyed in one pass: the conversion is one-to-one, so
+        keys stay unique, but a corrected SPN can equal another entry's old one.
+        """
+        changed = False
+        converted: dict[_FaultKey, dict[str, Any]] = {}
+        for key, entry in self._entries.items():
+            source, spn, fmi = key
+            if spn != _MULTI_PACKET and was_big_endian(source):
+                new_spn = big_endian_spn_to_little_endian(spn)
+                if new_spn != spn:
+                    entry["spn"] = new_spn
+                    entry["description"] = describe(source, new_spn, fmi)
+                    key = (source, new_spn, fmi)
+                    changed = True
+            converted[key] = entry
+        self._entries = converted
         return changed
 
     def _trim(self) -> None:
@@ -195,8 +281,8 @@ class DM1FaultLog:
             del self._entries[key]
 
     def as_dict(self) -> dict[str, Any]:
-        """Serialize the log for Home Assistant restore storage."""
-        return {"entries": self.entries}
+        """Serialize the log for Home Assistant storage."""
+        return {"format": FAULT_LOG_FORMAT, "entries": self.entries}
 
     @classmethod
     def from_dict(

@@ -54,7 +54,7 @@ class TestRuntimeDecode:
 
     def test_dm1_keys_emitted_when_selected(self):
         protocol, decoder = _build_decoder(with_man_profile=True)
-        frames = [{"id": 419351040, "data": "44FFFE00C201FFFF"}]
+        frames = [{"id": 419351040, "data": "44FF06F0E201FFFF"}]
         selected = {"can.can2.j1939.dm1.active_fault", "can.can2.j1939.dm1.active_spn"}
         values, _, _ = protocol.decode_runtime(frames, "can2", selected, decoder)
         assert "can.can2.j1939.dm1.active_fault" in values

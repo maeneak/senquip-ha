@@ -50,7 +50,7 @@ PGN_DATABASE: dict[int, PGNDefinition] = {
         name="Electronic Engine Controller 1",
         acronym="EEC1",
         length=8,
-        spns=(899, 512, 513, 190, 1483, 2432),
+        spns=(899, 512, 513, 190, 1483, 1675, 2432),
     ),
     # PGN 61443 - Electronic Engine Controller 2
     61443: PGNDefinition(
@@ -249,9 +249,11 @@ SPN_DATABASE: dict[int, SPNDefinition] = {
         min_value=0,
         max_value=8031.875,
     ),
+    # Address of the device currently commanding the engine (e.g. a helm or
+    # engine control system), not the engine ECU's own address
     1483: SPNDefinition(
         spn=1483,
-        name="Source Address of Engine Controller",
+        name="Source Address of Controlling Device",
         pgn=61444,
         start_byte=6,
         start_bit=1,
@@ -260,7 +262,34 @@ SPN_DATABASE: dict[int, SPNDefinition] = {
         offset=0,
         unit="",
         min_value=0,
-        max_value=255,
+        max_value=253,
+    ),
+    # 9-11 are reserved; 14 (error) and 15 (not available) decode as None
+    1675: SPNDefinition(
+        spn=1675,
+        name="Engine Starter Mode",
+        pgn=61444,
+        start_byte=7,
+        start_bit=1,
+        bit_length=4,
+        resolution=1,
+        offset=0,
+        unit="",
+        min_value=0,
+        max_value=15,
+        states={
+            0: "Start Not Requested",
+            1: "Starter Active, Gear Not Engaged",
+            2: "Starter Active, Gear Engaged",
+            3: "Start Finished",
+            4: "Inhibited: Engine Running",
+            5: "Inhibited: Engine Not Ready",
+            6: "Inhibited: Driveline Engaged",
+            7: "Inhibited: Immobilizer",
+            8: "Inhibited: Starter Over-Temperature",
+            12: "Inhibited: Reason Unknown",
+            13: "Error",
+        },
     ),
     2432: SPNDefinition(
         spn=2432,

@@ -134,6 +134,23 @@ class DeviceInfo(dict):
         super().__init__(**kwargs)
 
 
+class DeviceRegistry:
+    """Stub device registry; ``devices`` maps device id to a device object."""
+
+    def __init__(self):
+        self.devices = {}
+
+    def async_get(self, device_id):
+        return self.devices.get(device_id)
+
+
+DEVICE_REGISTRY = DeviceRegistry()
+
+
+def device_registry_async_get(hass):
+    return DEVICE_REGISTRY
+
+
 class AddEntitiesCallback:
     pass
 
