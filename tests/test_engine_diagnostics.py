@@ -193,7 +193,7 @@ class TestFaultTransitions:
         assert DM1FaultLog.from_dict(log.as_dict()).pop_transitions() == []
 
 
-def _coordinator():
+def _coordinator(profiles=("man_d2862.json",)):
     entry = ConfigEntry(data={
         "device_id": "HE8EV12LF",
         "device_name": "Starboard Senquip Quad",
@@ -201,7 +201,7 @@ def _coordinator():
         "selected_signals": ["can.can2.j1939.dm1.active_fault"],
         "port_configs": {"can2": {
             "family": "can", "active": True, "protocol": "j1939",
-            "profiles": ["man_d2862.json"],
+            "profiles": list(profiles),
         }},
     })
     return SenquipDataCoordinator(MagicMock(), entry, _profiles())
@@ -268,7 +268,17 @@ class TestFaultEvents:
         sensor._handle_coordinator_update()
         assert _fired(coord)[0]["device_name"] == "Senquip CAN 2"
 
-    def test_no_event_without_registry_entry_lookup(self):
+    def test_state_written_before_event(self):
+        """Automations triggered by the event must see the updated log."""
+        coord = _coordinator()
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+        writes_at_fire = []
+        coord.hass.bus.async_fire.side_effect = lambda *a: writes_at_fire.append(sensor.state_writes)
+        coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
+        sensor._handle_coordinator_update()
+        assert writes_at_fire == [1]
+
+    def test_event_without_registry_entry_has_no_device_id(self):
         """Without a registry entry the config entry's device name is used."""
         coord = _coordinator()
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
@@ -366,13 +376,28 @@ class TestBigEndianLogCorrection:
         assert 22407 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
         assert sensor._store.save_calls == 0
 
-    def test_restore_state_log_converted(self):
-        """A 0.6.0 log migrated from restore-state data is corrected too."""
+    def test_restore_state_log_converted_for_every_source(self):
+        """0.6.0 decoded every source on the MAN port big-endian."""
+        log_v060 = {"entries": [
+            _entry(0, 22407, 14, "SPN 22407: Unknown SPN 22407"),
+            # Coolant SPN 110 from a gearbox ECU (bytes 6E 00 00) read big-endian
+            _entry(3, 225280, 0, "SPN 225280: Unknown SPN 225280"),
+        ]}
         coord = _coordinator()
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
-        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=LOG_V070))
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=log_v060))
         asyncio.run(sensor.async_added_to_hass())
-        assert 520202 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
+        by_source = {e["source_address"]: e for e in sensor.extra_state_attributes["faults"]}
+        assert by_source[0]["spn"] == 520202
+        assert by_source[3]["spn"] == 110
+        assert by_source[3]["description"].startswith("SPN 110: Engine Coolant Temperature")
+
+    def test_port_without_man_profile_not_converted(self):
+        """Only the bundled MAN profile ever decoded big-endian."""
+        Store.saved[STORE_KEY] = LOG_V070
+        sensor = _load_sensor(_coordinator(profiles=()))
+        assert 22407 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
+        assert sensor._store.save_calls == 0
 
     def test_corrected_spn_equal_to_another_old_spn(self):
         """22407 becomes 520202 while the old 520202 becomes 131582: keep both."""

@@ -95,6 +95,11 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return protocol/decoder tuple for a CAN port if available."""
         return self._can_runtime.get(port_id)
 
+    def get_port_profile_names(self, port_id: str) -> list[str]:
+        """Return the profile file names configured for a port."""
+        config = self._port_configs.get(port_id)
+        return list(config.profiles) if config is not None else []
+
     def get_dm1_reports(self, port_id: str) -> list[dict[str, Any]]:
         """Return the DM1 frames decoded on a port in the latest payload.
 

@@ -27,6 +27,9 @@ MAX_FAULT_LOG_ENTRIES = 25
 # decoded big-endian. 2 (0.8.0): every SPN is decoded little-endian.
 FAULT_LOG_FORMAT = 2
 
+# Bundled profiles that decoded DM1 big-endian before format 2
+LEGACY_BIG_ENDIAN_PROFILES = frozenset({"man_d2862.json"})
+
 # Home Assistant Store (.storage) settings for the persisted log
 FAULT_HISTORY_STORE_VERSION = 1
 FAULT_HISTORY_SAVE_DELAY = 1  # seconds; batches bursts of changes into one write

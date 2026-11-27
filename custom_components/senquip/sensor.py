@@ -36,6 +36,7 @@ from .fault_history import (
     FAULT_HISTORY_SAVE_DELAY,
     FAULT_HISTORY_STORE_VERSION,
     FAULT_LOG_FORMAT,
+    LEGACY_BIG_ENDIAN_PROFILES,
     DM1FaultLog,
     fault_history_store_key,
 )
@@ -262,14 +263,16 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         stored = await self._store.async_load()
         if stored is not None:
             self._log = DM1FaultLog.from_dict(stored)
-            if stored.get("format", 1) < FAULT_LOG_FORMAT and self._convert_big_endian_spns():
+            if stored.get("format", 1) < FAULT_LOG_FORMAT and self._convert_big_endian_spns(
+                all_sources=False
+            ):
                 self._schedule_save()
         else:
             # Migrate a log that 0.6.0 kept in restore-state data
             last_extra = await self.async_get_last_extra_data()
             if last_extra is not None:
                 self._log = DM1FaultLog.from_dict(last_extra.as_dict())
-                self._convert_big_endian_spns()
+                self._convert_big_endian_spns(all_sources=True)
                 self._schedule_save()
         await super().async_added_to_hass()
         # Catch a payload that arrived before this entity was listening
@@ -282,20 +285,26 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         await super().async_will_remove_from_hass()
         await self._store.async_save(self._log.as_dict())
 
-    def _convert_big_endian_spns(self) -> bool:
+    def _convert_big_endian_spns(self, all_sources: bool) -> bool:
         """Correct SPNs that 0.6.0-0.7.0 decoded big-endian.
 
-        Those versions decoded DM1 big-endian wherever the MAN profile's DM1
-        options applied; the engines send the standard layout, so the logged
-        SPNs (and descriptions) were wrong.
+        Only the bundled MAN profile ever used big-endian, on its DM1 ports:
+        0.6.0 for every source (``all_sources``, a log still in restore-state
+        data), 0.7.0 for the profile's source addresses. The engines send the
+        standard layout, so those SPNs (and descriptions) were wrong. A format 1
+        store may also hold 0.6.0 entries; they are judged by the 0.7.0 rule.
         """
-        runtime = self.coordinator.get_can_runtime(self._port_id)
+        port = self._port_id
+        if not LEGACY_BIG_ENDIAN_PROFILES.intersection(self.coordinator.get_port_profile_names(port)):
+            return False
+        runtime = self.coordinator.get_can_runtime(port)
         if runtime is None:
             return False
         decoder = runtime[1]
-        port = self._port_id
+        if not decoder.dm1_options_apply(port, None):
+            return False  # not one of the profile's DM1 ports
         return self._log.convert_big_endian_spns(
-            lambda source: decoder.dm1_options_apply(port, source),
+            lambda source: all_sources or decoder.dm1_options_apply(port, source),
             lambda source, spn, fmi: decoder.get_fault_description(
                 spn, fmi, decoder.get_dm1_custom_fault_spns(port, source)
             ),
@@ -350,8 +359,9 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         """Update the log; write state only when it changed."""
         if self._observe_latest():
             self._schedule_save()
-            self._fire_transitions()
+            # State first, so automations triggered by the event read the new log
             self.async_write_ha_state()
+            self._fire_transitions()
 
     @property
     def native_value(self) -> StateType:
