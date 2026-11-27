@@ -20,6 +20,7 @@ from custom_components.senquip.fault_history import (
     FAULT_LOG_FORMAT,
     big_endian_spn_to_little_endian,
     fault_history_store_key,
+    legacy_fault_history_store_key,
 )
 from custom_components.senquip.sensor import SenquipDM1FaultHistorySensor, _resolve_sensor_meta
 from tests.ha_stubs import DEVICE_REGISTRY, ConfigEntry, Store
@@ -321,6 +322,7 @@ LOG_V070 = {"entries": [
     _entry(3, 110, 0, "SPN 110: Engine Coolant Temperature (FMI 0: Data Valid - Above Normal Range)"),
 ]}
 STORE_KEY = fault_history_store_key("HE8EV12LF", "can2")
+LEGACY_KEY = legacy_fault_history_store_key("HE8EV12LF", "can2")
 
 
 def _load_sensor(coord):
@@ -339,7 +341,7 @@ class TestBigEndianLogCorrection:
         assert big_endian_spn_to_little_endian(big_endian) == little_endian
 
     def test_v070_log_corrected_on_load(self):
-        Store.saved[STORE_KEY] = LOG_V070
+        Store.saved[LEGACY_KEY] = LOG_V070
         coord = _coordinator()
         sensor = _load_sensor(coord)
         by_source = {}
@@ -354,12 +356,14 @@ class TestBigEndianLogCorrection:
         # Not a MAN source: never decoded big-endian, left alone
         assert [e["spn"] for e in by_source[3]] == [110]
         assert _fired(coord) == []  # a correction is not a fault transition
-        sensor._store.flush()
+        # Saved to the new key at once; the 0.7.0 file is left for a downgrade
         assert Store.saved[STORE_KEY]["format"] == FAULT_LOG_FORMAT
+        assert Store.saved[STORE_KEY]["entries"] == sensor.extra_state_attributes["faults"]
+        assert Store.saved[LEGACY_KEY] == LOG_V070
 
     def test_corrected_active_fault_continues_without_events(self):
         """A fault active across the upgrade must not fire a false clear/raise."""
-        Store.saved[STORE_KEY] = {"entries": [
+        Store.saved[LEGACY_KEY] = {"entries": [
             _entry(0, 22407, 14, "SPN 22407: Unknown SPN 22407", active=True),
         ]}
         coord = _coordinator()
@@ -370,11 +374,24 @@ class TestBigEndianLogCorrection:
         [entry] = sensor.extra_state_attributes["faults"]
         assert entry["spn"] == 520202 and entry["active"] is True
 
-    def test_current_format_not_converted(self):
-        Store.saved[STORE_KEY] = {"format": FAULT_LOG_FORMAT, "entries": LOG_V070["entries"]}
+    def test_current_store_never_converted(self):
+        """A log in the 0.8.0 store is used as is, whatever its format field says."""
+        Store.saved[STORE_KEY] = {"entries": LOG_V070["entries"]}
+        Store.saved[LEGACY_KEY] = LOG_V070
         sensor = _load_sensor(_coordinator())
         assert 22407 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
         assert sensor._store.save_calls == 0
+
+    def test_corrected_only_once(self):
+        """Restarting, or downgrading and upgrading again, must not re-correct."""
+        Store.saved[LEGACY_KEY] = LOG_V070
+        _load_sensor(_coordinator())
+        # A downgraded 0.7.0 keeps writing big-endian SPNs to its own file
+        Store.saved[LEGACY_KEY] = {"entries": [_entry(0, 14215, 2, "SPN 14215")]}
+        sensor = _load_sensor(_coordinator())
+        spns = {e["spn"] for e in sensor.extra_state_attributes["faults"]}
+        assert 520202 in spns
+        assert 131582 not in spns  # 520202 corrected a second time
 
     def test_restore_state_log_converted_for_every_source(self):
         """0.6.0 decoded every source on the MAN port big-endian."""
@@ -391,13 +408,23 @@ class TestBigEndianLogCorrection:
         assert by_source[0]["spn"] == 520202
         assert by_source[3]["spn"] == 110
         assert by_source[3]["description"].startswith("SPN 110: Engine Coolant Temperature")
+        assert Store.saved[STORE_KEY]["entries"] == sensor.extra_state_attributes["faults"]
 
     def test_port_without_man_profile_not_converted(self):
         """Only the bundled MAN profile ever decoded big-endian."""
-        Store.saved[STORE_KEY] = LOG_V070
+        Store.saved[LEGACY_KEY] = LOG_V070
         sensor = _load_sensor(_coordinator(profiles=()))
         assert 22407 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
-        assert sensor._store.save_calls == 0
+        assert Store.saved[STORE_KEY]["entries"] == sensor.extra_state_attributes["faults"]
+
+    def test_startup_event_after_state_written(self):
+        coord = _coordinator()
+        coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+        writes_at_fire = []
+        coord.hass.bus.async_fire.side_effect = lambda *a: writes_at_fire.append(sensor.state_writes)
+        asyncio.run(sensor.async_added_to_hass())
+        assert writes_at_fire == [1]
 
     def test_corrected_spn_equal_to_another_old_spn(self):
         """22407 becomes 520202 while the old 520202 becomes 131582: keep both."""

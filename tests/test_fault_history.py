@@ -9,7 +9,11 @@ import pytest
 
 from custom_components.senquip import SenquipDataCoordinator, async_remove_entry
 from custom_components.senquip.can_profiles.loader import discover_profiles
-from custom_components.senquip.fault_history import DM1FaultLog, fault_history_store_key
+from custom_components.senquip.fault_history import (
+    DM1FaultLog,
+    fault_history_store_key,
+    legacy_fault_history_store_key,
+)
 from custom_components.senquip.sensor import (
     SenquipDM1FaultHistorySensor,
     async_setup_entry,
@@ -418,6 +422,7 @@ class TestRemoveEntry:
         Store.saved[fault_history_store_key("test_dev", "can1")] = {"entries": []}
         Store.saved[fault_history_store_key("test_dev", "can2")] = {"entries": []}
         Store.saved[fault_history_store_key("other_dev", "can2")] = {"entries": []}
+        Store.saved[legacy_fault_history_store_key("test_dev", "can2")] = {"entries": []}
         entry = ConfigEntry(data={"device_id": "test_dev"})
         asyncio.run(async_remove_entry(MagicMock(), entry))
         assert list(Store.saved) == [fault_history_store_key("other_dev", "can2")]

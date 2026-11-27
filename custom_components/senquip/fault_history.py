@@ -23,8 +23,10 @@ from typing import Any, Callable, Iterable, Mapping
 
 MAX_FAULT_LOG_ENTRIES = 25
 
-# Saved log format. 1 (0.6.0-0.7.0): SPNs from the MAN profile's sources were
-# decoded big-endian. 2 (0.8.0): every SPN is decoded little-endian.
+# Saved log format, informational. 1 (0.6.0-0.7.0, legacy store key): SPNs
+# from the MAN profile's sources were decoded big-endian. 2 (0.8.0): every SPN
+# is decoded little-endian. Which store a log is in decides whether it needs
+# correcting, since older versions drop this field when they save.
 FAULT_LOG_FORMAT = 2
 
 # Bundled profiles that decoded DM1 big-endian before format 2
@@ -36,7 +38,18 @@ FAULT_HISTORY_SAVE_DELAY = 1  # seconds; batches bursts of changes into one writ
 
 
 def fault_history_store_key(device_id: str, port_id: str) -> str:
-    """Return the .storage key holding one port's fault log."""
+    """Return the .storage key holding one port's fault log (0.8.0+)."""
+    return f"senquip.dm1_fault_log.{device_id}.{port_id}"
+
+
+def legacy_fault_history_store_key(device_id: str, port_id: str) -> str:
+    """Return the .storage key 0.7.0 used, holding format 1 logs.
+
+    0.8.0 reads it once when its own store is missing, corrects the SPNs and
+    saves to the new key, so a log can never be corrected twice (after a
+    crash before saving, or a downgrade and upgrade). It is left in place for
+    a downgrade and deleted with the config entry.
+    """
     return f"senquip.dm1_fault_history.{device_id}.{port_id}"
 
 

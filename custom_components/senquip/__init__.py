@@ -32,7 +32,11 @@ from .const import (
     SensorStateClass,
     deserialize_port_configs,
 )
-from .fault_history import FAULT_HISTORY_STORE_VERSION, fault_history_store_key
+from .fault_history import (
+    FAULT_HISTORY_STORE_VERSION,
+    fault_history_store_key,
+    legacy_fault_history_store_key,
+)
 from .signal_keys import LEGACY_SELECTED_SENSORS_KEY, normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
@@ -400,10 +404,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if not device_id:
         return
     for port_id in CAN_PORTS:
-        store = Store(
-            hass,
-            FAULT_HISTORY_STORE_VERSION,
+        for key in (
             fault_history_store_key(device_id, port_id),
-            atomic_writes=True,
-        )
-        await store.async_remove()
+            legacy_fault_history_store_key(device_id, port_id),
+        ):
+            await Store(hass, FAULT_HISTORY_STORE_VERSION, key, atomic_writes=True).async_remove()

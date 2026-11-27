@@ -35,10 +35,10 @@ from .const import (
 from .fault_history import (
     FAULT_HISTORY_SAVE_DELAY,
     FAULT_HISTORY_STORE_VERSION,
-    FAULT_LOG_FORMAT,
     LEGACY_BIG_ENDIAN_PROFILES,
     DM1FaultLog,
     fault_history_store_key,
+    legacy_fault_history_store_key,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -263,22 +263,39 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         stored = await self._store.async_load()
         if stored is not None:
             self._log = DM1FaultLog.from_dict(stored)
-            if stored.get("format", 1) < FAULT_LOG_FORMAT and self._convert_big_endian_spns(
-                all_sources=False
-            ):
-                self._schedule_save()
         else:
-            # Migrate a log that 0.6.0 kept in restore-state data
-            last_extra = await self.async_get_last_extra_data()
-            if last_extra is not None:
-                self._log = DM1FaultLog.from_dict(last_extra.as_dict())
-                self._convert_big_endian_spns(all_sources=True)
-                self._schedule_save()
+            await self._migrate_legacy_log()
         await super().async_added_to_hass()
         # Catch a payload that arrived before this entity was listening
         if self._observe_latest():
             self._schedule_save()
+            self.async_write_ha_state()
             self._fire_transitions()
+
+    async def _migrate_legacy_log(self) -> None:
+        """Load a log saved by an older version, correct its SPNs and save it.
+
+        0.7.0 kept the log under the legacy store key, 0.6.0 in restore-state
+        data. Both are format 1 (big-endian SPNs on the MAN profile's port).
+        The result is saved to the current key at once, so the correction can
+        never be applied twice.
+        """
+        legacy = await Store(
+            self.coordinator.hass,
+            FAULT_HISTORY_STORE_VERSION,
+            legacy_fault_history_store_key(self._device_id, self._port_id),
+        ).async_load()
+        if legacy is not None:
+            self._log = DM1FaultLog.from_dict(legacy)
+            self._convert_big_endian_spns(all_sources=False)
+        else:
+            last_extra = await self.async_get_last_extra_data()
+            if last_extra is None:
+                return
+            self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+            # 0.6.0 had no source filter: every source on the port was big-endian
+            self._convert_big_endian_spns(all_sources=True)
+        await self._store.async_save(self._log.as_dict())
 
     async def async_will_remove_from_hass(self) -> None:
         """Flush any pending save so it cannot land after the file is deleted."""
