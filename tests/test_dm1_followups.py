@@ -27,7 +27,9 @@ ALL_DM1 = {
 
 # DM1 frames from different source addresses
 MAN_NO_FAULT = {"id": 0x18FECA00, "data": "C0FF00000000FFFF"}             # SA 0x00
-MAN_ESTOP_BE = {"id": 0x18FECA00, "data": "C1FFFE00C201FFFF"}             # SA 0x00, BE SPN 520198
+MAN_ESTOP = {"id": 0x18FECA00, "data": "C1FF06F0E201FFFF"}                # SA 0x00, SPN 520198 FMI 2
+# Captured from the starboard D2862 on 2026-11-27 (Red Stop, SPN 520202 FMI 14)
+MAN_START_PREVENTED = {"id": 0x18FECA00, "data": "D0FF0AF0EE01FFFF"}
 GEARBOX_COOLANT_LE = {"id": 0x18FECA03, "data": "04FF6E000001FFFF"}       # SA 0x03, LE SPN 110, amber
 AFTERTREATMENT_UNSUPPORTED = {"id": 0x18FECA3D, "data": "FFFF00000000FFFF"}  # SA 0x3D, all lamps N/A
 MAN_BAM_3_DTCS = {"id": 0x1CECFF00, "data": "200E0002FFCAFE00"}          # SA 0x00, 14 bytes
@@ -109,7 +111,7 @@ class TestDM1BAM:
 
 class TestMultiSourceDM1:
     def test_single_source_unchanged(self):
-        values, _, _ = _decode([MAN_ESTOP_BE])
+        values, _, _ = _decode([MAN_ESTOP])
         assert values[PREFIX + "active_fault"].startswith("SPN 520198: Emergency Stop")
         assert values[PREFIX + "active_fault_count"] == 1
         assert values[PREFIX + "protect_lamp"] == "Active"
@@ -124,7 +126,7 @@ class TestMultiSourceDM1:
         assert values[PREFIX + "active_fault"].startswith("SPN 110:")
 
     def test_all_faults_listed(self):
-        values, _, _ = _decode([MAN_ESTOP_BE, GEARBOX_COOLANT_LE])
+        values, _, _ = _decode([MAN_ESTOP, GEARBOX_COOLANT_LE])
         fault = values[PREFIX + "active_fault"]
         assert fault.startswith("2 Active Faults: SPN 520198")
         assert "SPN 110" in fault
@@ -154,7 +156,7 @@ class TestMultiSourceDM1:
         """Sources age on every port payload, not only DM1-bearing ones."""
         protocol, decoder = _man_runtime()
         run = lambda frames: protocol.decode_runtime(frames, "can2", ALL_DM1, decoder)[0]
-        run([MAN_ESTOP_BE, GEARBOX_COOLANT_LE])
+        run([MAN_ESTOP, GEARBOX_COOLANT_LE])
         for _ in range(6):
             run([{"id": 217056256, "data": "3FFFCD883927F4FF"}])  # EEC1 only
         values = run([GEARBOX_COOLANT_LE])
@@ -171,7 +173,7 @@ class TestMultiSourceDM1:
 
     def test_payload_without_dm1_emits_nothing(self):
         protocol, decoder = _man_runtime()
-        protocol.decode_runtime([MAN_ESTOP_BE], "can2", ALL_DM1, decoder)
+        protocol.decode_runtime([MAN_ESTOP], "can2", ALL_DM1, decoder)
         values, _, _ = protocol.decode_runtime(
             [{"id": 217056256, "data": "3FFFCD883927F4FF"}], "can2", ALL_DM1, decoder
         )
@@ -186,7 +188,7 @@ class TestMultiSourceDM1:
         assert values[PREFIX + "active_fault"].endswith("...")
 
     def test_only_selected_keys_emitted(self):
-        values, _, _ = _decode([MAN_ESTOP_BE], selected={PREFIX + "red_stop"})
+        values, _, _ = _decode([MAN_ESTOP], selected={PREFIX + "red_stop"})
         assert values == {PREFIX + "red_stop": "Off"}
 
 
@@ -200,14 +202,25 @@ class TestPerSourceEncoding:
         _, _, dm1 = parse_j1939_profile(profiles["man_d2862.json"])
         assert dm1.source_addresses == (0, 1, 39)
 
-    def test_other_source_on_man_port_decoded_little_endian(self):
-        """A standard ECU sharing can2 with the MAN engine keeps LE SPN decoding."""
-        _, diagnostics, _ = _decode([MAN_ESTOP_BE, GEARBOX_COOLANT_LE])
+    def test_man_profile_decodes_little_endian(self):
+        """Live MAN DM1 uses the standard layout, not the PDF's big-endian example."""
+        _, diagnostics, _ = _decode([MAN_ESTOP, GEARBOX_COOLANT_LE])
         by_source = {d["source_address"]: d["dm1"] for d in diagnostics}
-        assert by_source[0x00]["encoding"] == "big_endian"
+        assert by_source[0x00]["encoding"] == "little_endian"
         assert by_source[0x00]["active_spn"] == 520198
         assert by_source[0x03]["encoding"] == "little_endian"
         assert by_source[0x03]["active_spn"] == 110
+
+    def test_captured_start_prevented_fault(self):
+        """Regression: this frame was shown as "Unknown SPN 22407" under big-endian."""
+        values, _, _ = _decode([MAN_START_PREVENTED])
+        assert values[PREFIX + "active_spn"] == 520202
+        assert values[PREFIX + "active_fmi"] == 14
+        assert values[PREFIX + "active_fault"] == (
+            "SPN 520202: Engine Start Prevented (FMI 14: Special Instructions)"
+        )
+        assert values[PREFIX + "red_stop"] == "Active"
+        assert values[PREFIX + "protect_lamp"] == "Off"
 
     @pytest.mark.parametrize(
         "config, port, source, expected",
@@ -296,7 +309,7 @@ class TestPerSourceEncoding:
         assert "Emergency Stop" not in diagnostics[0]["dm1"]["active_fault"]
         assert "Unknown SPN 520198" in diagnostics[0]["dm1"]["active_fault"]
         # The MAN engine (SA 0x00) still gets the profile's name
-        _, diagnostics, _ = _decode([MAN_ESTOP_BE])
+        _, diagnostics, _ = _decode([MAN_ESTOP])
         assert "Emergency Stop" in diagnostics[0]["dm1"]["active_fault"]
 
 
@@ -366,7 +379,7 @@ class TestDM1StateLifecycle:
 
     def test_port_absent_resets_dm1_sources(self):
         protocol, decoder = _man_runtime()
-        protocol.decode_runtime([MAN_ESTOP_BE, GEARBOX_COOLANT_LE], "can2", ALL_DM1, decoder)
+        protocol.decode_runtime([MAN_ESTOP, GEARBOX_COOLANT_LE], "can2", ALL_DM1, decoder)
         protocol.reset_runtime_state(decoder)
         values, _, _ = protocol.decode_runtime([GEARBOX_COOLANT_LE], "can2", ALL_DM1, decoder)
         assert values[PREFIX + "active_fault_count"] == 1
@@ -408,7 +421,7 @@ class TestFaultLogMultiPacket:
         """Going from 1 DTC to a BAM must not mark the known DTC as cleared."""
         from datetime import datetime, timedelta, timezone
         t0 = datetime(2026, 11, 27, tzinfo=timezone.utc)
-        _, single, _ = _decode([MAN_ESTOP_BE])
+        _, single, _ = _decode([MAN_ESTOP])
         _, multi, _ = _decode([MAN_BAM_3_DTCS])
         _, clear, _ = _decode([MAN_NO_FAULT])
         as_report = lambda diag: {"source_address": diag[0]["source_address"], **diag[0]["dm1"]}

@@ -11,6 +11,9 @@ from Senquip payloads, so it is logged as one entry per source with
 ``spn``/``fmi`` of None, active until that source sends a single-frame DM1.
 While a source is in multi-packet mode its individually known faults stay
 active (they cannot be confirmed either way) until a single frame settles them.
+
+Each fault becoming active or clearing is also recorded as a transition, which
+the fault history sensor fires as a Home Assistant event.
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ class DM1FaultLog:
     def __init__(self, max_entries: int = MAX_FAULT_LOG_ENTRIES) -> None:
         self._max_entries = max_entries
         self._entries: dict[_FaultKey, dict[str, Any]] = {}
+        self._transitions: list[dict[str, Any]] = []
 
     @property
     def entries(self) -> list[dict[str, Any]]:
@@ -68,6 +72,18 @@ class DM1FaultLog:
             reverse=True,
         )
         return [dict(entry, lamps=list(entry["lamps"])) for entry in ordered]
+
+    def pop_transitions(self) -> list[dict[str, Any]]:
+        """Return and forget faults that became active or cleared since the last call.
+
+        Each item is a snapshot of the log entry plus ``status`` ("active" or
+        "cleared"), in the order the changes were observed.
+        """
+        transitions, self._transitions = self._transitions, []
+        return transitions
+
+    def _record_transition(self, entry: Mapping[str, Any], status: str) -> None:
+        self._transitions.append(dict(entry, lamps=list(entry["lamps"]), status=status))
 
     @property
     def active_count(self) -> int:
@@ -146,10 +162,12 @@ class DM1FaultLog:
                     "last_activated": timestamp,
                     "cleared": None,
                 }
+                self._record_transition(self._entries[key], "active")
                 changed = True
                 continue
 
-            if not entry["active"]:
+            activated = not entry["active"]
+            if activated:
                 entry["active"] = True
                 entry["count"] += 1
                 entry["last_activated"] = timestamp
@@ -164,6 +182,8 @@ class DM1FaultLog:
                 if entry[field] != value:
                     entry[field] = value
                     changed = True
+            if activated:
+                self._record_transition(entry, "active")
 
         for key, entry in self._entries.items():
             if key[0] in multi_packet_sources and key[1] != _MULTI_PACKET:
@@ -171,6 +191,7 @@ class DM1FaultLog:
             if entry["active"] and key[0] in reporting_sources and key not in current:
                 entry["active"] = False
                 entry["cleared"] = timestamp
+                self._record_transition(entry, "cleared")
                 changed = True
 
         if changed:

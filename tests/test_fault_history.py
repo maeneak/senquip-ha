@@ -235,7 +235,7 @@ def _payload(can2_dm1):
 class TestCoordinatorDM1Reports:
     def test_reports_collected_without_dm1_signals_selected(self):
         _, coord = _coordinator(["can.can2.j1939.spn190"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         [report] = coord.get_dm1_reports("can2")
         assert report["source_address"] == MAN_SA
         assert report["active_spn"] == 520198
@@ -245,7 +245,7 @@ class TestCoordinatorDM1Reports:
 
     def test_reports_reset_when_payload_has_no_dm1(self):
         _, coord = _coordinator(["can.can2.j1939.spn190"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         coord._parse_payload({"deviceid": "test_dev", "can2": [{"id": 217056256, "data": "3FFFCD883927F4FF"}]})
         assert coord.get_dm1_reports("can2") == []
 
@@ -267,7 +267,7 @@ class TestFaultHistorySensor:
         assert sensor.native_value == 0
         assert sensor.available is True
 
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         assert sensor.native_value == 1
         attrs = sensor.extra_state_attributes
@@ -288,7 +288,7 @@ class TestFaultHistorySensor:
         coord._parse_payload(_payload("C0FF00000000FFFF"))
         sensor._handle_coordinator_update()
         assert sensor.state_writes == 0
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         sensor._handle_coordinator_update()
         assert sensor.state_writes == 1
@@ -298,7 +298,7 @@ class TestFaultHistorySensor:
 
     def test_payload_before_entity_added_is_logged(self):
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.extra_state_attributes["active_faults"] == 1
@@ -309,7 +309,7 @@ class TestFaultHistorySensor:
         coord._parse_payload(_payload("C0FF00000000FFFF"))
         original._handle_coordinator_update()
         assert original._store.save_calls == 0  # nothing changed, nothing saved
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         original._handle_coordinator_update()
         assert original._store.save_calls == 1
         assert original._store.key == fault_history_store_key("test_dev", "can2")
@@ -363,7 +363,7 @@ class TestFaultHistorySensor:
         """Removal writes immediately so no delayed save lands after deletion."""
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
-        coord._parse_payload(_payload("C1FFFE00C201FFFF"))
+        coord._parse_payload(_payload("C1FF06F0E201FFFF"))
         sensor._handle_coordinator_update()
         key = fault_history_store_key("test_dev", "can2")
         assert key not in Store.saved  # still pending

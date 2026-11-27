@@ -13,6 +13,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -26,6 +27,7 @@ from .const import (
     CONF_DEVICE_NAME,
     CONF_SELECTED_SIGNALS,
     DOMAIN,
+    EVENT_DM1_FAULT,
     KNOWN_INTERNAL_SENSORS,
     PORT_DISPLAY_NAMES,
     SensorMeta,
@@ -216,6 +218,8 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     ``faults`` attribute. The log is saved to its own .storage file shortly
     after every change so it survives restarts and power loss.
     ``RestoreEntity`` is kept only to migrate logs saved by 0.6.0.
+
+    Each fault becoming active or clearing fires an ``EVENT_DM1_FAULT`` event.
     """
 
     _attr_has_entity_name = True
@@ -234,6 +238,8 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self._port_id = port_id
+        self._device_id = device_id
+        self._device_name = device_name
         signal_key = f"can.{port_id}.j1939.dm1.fault_history"
         self._attr_unique_id = f"{device_id}_{signal_key}"
         self._attr_name = "DM1 Fault History"
@@ -265,6 +271,7 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         # Catch a payload that arrived before this entity was listening
         if self._observe_latest():
             self._schedule_save()
+            self._fire_transitions()
 
     async def async_will_remove_from_hass(self) -> None:
         """Flush any pending save so it cannot land after the file is deleted."""
@@ -285,6 +292,31 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
             datetime.now(timezone.utc),
         )
 
+    def _fire_transitions(self) -> None:
+        """Fire an event for each fault that became active or cleared."""
+        transitions = self._log.pop_transitions()
+        if not transitions:
+            return
+        registry_entry = getattr(self, "registry_entry", None)
+        ha_device_id = registry_entry.device_id if registry_entry else None
+        device_name = self._device_name
+        if ha_device_id:
+            device = dr.async_get(self.coordinator.hass).async_get(ha_device_id)
+            if device is not None:
+                device_name = device.name_by_user or device.name or device_name
+        for transition in transitions:
+            self.coordinator.hass.bus.async_fire(
+                EVENT_DM1_FAULT,
+                {
+                    **transition,
+                    "device_id": ha_device_id,
+                    "device_name": device_name,
+                    "senquip_id": self._device_id,
+                    "port": self._port_id,
+                    "entity_id": getattr(self, "entity_id", None),
+                },
+            )
+
     @property
     def available(self) -> bool:
         """The log is history, so it stays available while the device is offline."""
@@ -295,6 +327,7 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         """Update the log; write state only when it changed."""
         if self._observe_latest():
             self._schedule_save()
+            self._fire_transitions()
             self.async_write_ha_state()
 
     @property

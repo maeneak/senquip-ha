@@ -31,6 +31,9 @@ CONF_PORT_CONFIGS = "port_configs"
 
 DEVICE_TIMEOUT = 30
 
+# Fired on the HA event bus when a DM1 fault becomes active or clears
+EVENT_DM1_FAULT = "senquip_dm1_fault"
+
 DISCOVERY_TIMEOUT = 60
 
 # Fraction threshold below which a TOTAL_INCREASING sensor drop is treated as
@@ -250,9 +253,10 @@ KNOWN_INTERNAL_SENSORS: dict[str, SensorMeta] = {
 }
 
 
-SPN_STATE_CLASS_OVERRIDES: dict[int, SensorStateClass] = {
+SPN_STATE_CLASS_OVERRIDES: dict[int, SensorStateClass | None] = {
     182: SensorStateClass.TOTAL,  # Engine Trip Fuel — resets each power cycle
     961: SensorStateClass.MEASUREMENT,  # Hours (Time/Date) — hour-of-day, not cumulative
+    1483: None,  # Controlling device source address — an identifier, not a measurement
 }
 
 
