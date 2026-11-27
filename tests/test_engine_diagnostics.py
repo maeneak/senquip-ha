@@ -410,6 +410,15 @@ class TestBigEndianLogCorrection:
         assert by_source[3]["description"].startswith("SPN 110: Engine Coolant Temperature")
         assert Store.saved[STORE_KEY]["entries"] == sensor.extra_state_attributes["faults"]
 
+    def test_corrected_even_if_profile_fails_to_load(self):
+        """The decision uses the fixed 0.7.0 rules, not today's decoder."""
+        Store.saved[LEGACY_KEY] = LOG_V070
+        coord = _coordinator()
+        coord._can_runtime.clear()  # e.g. profile or protocol failed to load
+        sensor = _load_sensor(coord)
+        man = {e["spn"]: e for e in sensor.extra_state_attributes["faults"] if e["source_address"] == 0}
+        assert man[520202]["description"] == "SPN 520202 (FMI 14)"
+
     def test_port_without_man_profile_not_converted(self):
         """Only the bundled MAN profile ever decoded big-endian."""
         Store.saved[LEGACY_KEY] = LOG_V070

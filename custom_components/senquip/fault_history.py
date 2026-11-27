@@ -29,8 +29,12 @@ MAX_FAULT_LOG_ENTRIES = 25
 # correcting, since older versions drop this field when they save.
 FAULT_LOG_FORMAT = 2
 
-# Bundled profiles that decoded DM1 big-endian before format 2
-LEGACY_BIG_ENDIAN_PROFILES = frozenset({"man_d2862.json"})
+# Where 0.6.0-0.7.0 decoded DM1 big-endian: the bundled MAN profile's DM1
+# options (fixed in those releases), on its port, for its source addresses
+# (0.7.0; 0.6.0 had no source filter)
+LEGACY_BIG_ENDIAN_PROFILE = "man_d2862.json"
+LEGACY_BIG_ENDIAN_PORTS = frozenset({"can2"})
+LEGACY_BIG_ENDIAN_SOURCES = frozenset({0x00, 0x01, 0x27})
 
 # Home Assistant Store (.storage) settings for the persisted log
 FAULT_HISTORY_STORE_VERSION = 1

@@ -37,7 +37,7 @@ The integration subscribes to MQTT telemetry, supports protocol-based CAN decodi
 
 ## Fault events
 
-The `DM1 Fault History` sensor fires `senquip_dm1_fault` on the event bus each time a fault becomes active or clears. A fault that stays active fires no further events, and a change of lamps or description on an active fault is not an event.
+The `DM1 Fault History` sensor fires `senquip_dm1_fault` on the event bus each time a fault becomes active or clears. A fault that stays active fires no further events, and a change of lamps or description on an active fault is not an event. Events need the `DM1 Fault History` entity: it exists when any DM1 signal is selected on the port, and disabling it stops the events.
 
 | Field | Description |
 | --- | --- |
@@ -151,7 +151,7 @@ The optional `dm1` section configures manufacturer-specific DM1 decoding:
 }
 ```
 
-- `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (SPN packed most significant byte first). The MAN D2862 PDF's worked example implies `big_endian`, but the engines in service send the standard layout, so the bundled MAN profile uses `little_endian`. Fault history entries logged before 0.8.0 from the MAN profile's sources are corrected to the little-endian SPN (and description) once, when the history is loaded after upgrading
+- `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (SPN packed most significant byte first). The MAN D2862 PDF's worked example implies `big_endian`, but the engines in service send the standard layout, so the bundled MAN profile uses `little_endian`. Fault history entries logged before 0.8.0 from the MAN profile's sources are corrected to the little-endian SPN (and description) once, when the history is loaded after upgrading. 0.8.0 keeps the history in a new storage file; faults logged after a downgrade to 0.7.0 are not carried back on a later upgrade
 - `ports`: limit the DM1 options to these ports. Leave it out (or `null`) for all ports using the profile
 - `source_addresses`: limit the DM1 options to DM1 from these J1939 source addresses, so other ECUs on the same bus keep standard decoding. Leave it out (or `null`) for all sources. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. An empty list, or a value that is not a list of valid entries (port names; integers 0-255), matches nothing rather than everything, so a typo cannot widen the options
 - `custom_fault_spns`: names for proprietary fault SPNs. Only applied to DM1 from the ports and sources above, since proprietary SPNs overlap between manufacturers

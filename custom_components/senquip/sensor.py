@@ -35,7 +35,9 @@ from .const import (
 from .fault_history import (
     FAULT_HISTORY_SAVE_DELAY,
     FAULT_HISTORY_STORE_VERSION,
-    LEGACY_BIG_ENDIAN_PROFILES,
+    LEGACY_BIG_ENDIAN_PORTS,
+    LEGACY_BIG_ENDIAN_PROFILE,
+    LEGACY_BIG_ENDIAN_SOURCES,
     DM1FaultLog,
     fault_history_store_key,
     legacy_fault_history_store_key,
@@ -305,26 +307,32 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     def _convert_big_endian_spns(self, all_sources: bool) -> bool:
         """Correct SPNs that 0.6.0-0.7.0 decoded big-endian.
 
-        Only the bundled MAN profile ever used big-endian, on its DM1 ports:
-        0.6.0 for every source (``all_sources``, a log still in restore-state
-        data), 0.7.0 for the profile's source addresses. The engines send the
-        standard layout, so those SPNs (and descriptions) were wrong. A format 1
-        store may also hold 0.6.0 entries; they are judged by the 0.7.0 rule.
+        Only the bundled MAN profile ever used big-endian, with DM1 options
+        fixed in those releases: on can2, for every source in 0.6.0
+        (``all_sources``, a log still in restore-state data) and for the MAN
+        source addresses in 0.7.0. The decision uses those fixed rules, not
+        today's decoder, so it holds even if the profile fails to load. A
+        0.7.0 store may also hold 0.6.0 entries; they get the 0.7.0 rule.
         """
         port = self._port_id
-        if not LEGACY_BIG_ENDIAN_PROFILES.intersection(self.coordinator.get_port_profile_names(port)):
+        if (
+            port not in LEGACY_BIG_ENDIAN_PORTS
+            or LEGACY_BIG_ENDIAN_PROFILE not in self.coordinator.get_port_profile_names(port)
+        ):
             return False
         runtime = self.coordinator.get_can_runtime(port)
-        if runtime is None:
-            return False
-        decoder = runtime[1]
-        if not decoder.dm1_options_apply(port, None):
-            return False  # not one of the profile's DM1 ports
-        return self._log.convert_big_endian_spns(
-            lambda source: all_sources or decoder.dm1_options_apply(port, source),
-            lambda source, spn, fmi: decoder.get_fault_description(
+        decoder = runtime[1] if runtime is not None else None
+
+        def describe(source: int, spn: int, fmi: int) -> str:
+            if decoder is None:
+                return f"SPN {spn} (FMI {fmi})"
+            return decoder.get_fault_description(
                 spn, fmi, decoder.get_dm1_custom_fault_spns(port, source)
-            ),
+            )
+
+        return self._log.convert_big_endian_spns(
+            lambda source: all_sources or source in LEGACY_BIG_ENDIAN_SOURCES,
+            describe,
         )
 
     def _schedule_save(self) -> None:
