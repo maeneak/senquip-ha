@@ -145,6 +145,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._offline_timer = None
         for port_id in self._can_port_available:
             self._can_port_available[port_id] = False
+        for protocol, decoder in self._can_runtime.values():
+            protocol.reset_runtime_state(decoder)
         # Push an update so binary sensors refresh
         if self.data is not None:
             self.async_set_updated_data(self.data)
@@ -312,6 +314,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 data.update(port_values)
                 self._can_port_available[key] = port_has_valid_data
+                if not port_has_valid_data:
+                    protocol.reset_runtime_state(decoder)
                 if port_diag:
                     diag[key] = {
                         "protocol": protocol.protocol_id,
@@ -341,9 +345,10 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     data[signal_key] = value
 
         # Mark configured CAN ports as unavailable when absent from payload
-        for port_id in self._can_runtime:
+        for port_id, (protocol, decoder) in self._can_runtime.items():
             if port_id not in payload:
                 self._can_port_available[port_id] = False
+                protocol.reset_runtime_state(decoder)
 
         self.diagnostics = diag
         self._dm1_reports = dm1_reports

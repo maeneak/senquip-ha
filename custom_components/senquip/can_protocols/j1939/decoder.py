@@ -55,10 +55,9 @@ DM1_LAMP_ON = 0b01
 DM1_SPN_NOT_AVAILABLE = 0x7FFFF
 
 # A DM1 source is dropped from the port's combined values once it has been
-# missing from more than this many consecutive port payloads, or for longer
-# than this many seconds (e.g. the ECU was switched off)
+# missing from more than this many consecutive port payloads. The tracker is
+# also reset when the device goes offline or the port becomes unavailable.
 DM1_SOURCE_MAX_MISSED_PAYLOADS = 5
-DM1_SOURCE_MAX_AGE = 300.0
 
 
 def dm1_fault_count_text(count: int, suffix: str = "") -> str:
@@ -76,39 +75,36 @@ class DM1SourceTracker:
     stops port-level values flapping between payloads.
     """
 
-    def __init__(
-        self,
-        max_missed: int = DM1_SOURCE_MAX_MISSED_PAYLOADS,
-        max_age: float = DM1_SOURCE_MAX_AGE,
-    ) -> None:
+    def __init__(self, max_missed: int = DM1_SOURCE_MAX_MISSED_PAYLOADS) -> None:
         self._max_missed = max_missed
-        self._max_age = max_age
         self._reports: dict[int, dict] = {}
         self._missed: dict[int, int] = {}
-        self._last_seen: dict[int, float] = {}
 
-    def update(self, current: dict[int, dict], now: float) -> list[dict]:
-        """Merge one port payload's reports and return the latest per source.
+    def reset(self) -> None:
+        """Forget every source (device offline or port unavailable)."""
+        self._reports.clear()
+        self._missed.clear()
+
+    def update(self, current: dict[int, dict]) -> tuple[list[dict], bool]:
+        """Merge one port payload's reports.
 
         Call for every payload on the port (``current`` may be empty) so that
-        sources age out. ``now`` is a monotonic time in seconds.
+        sources age out. Returns the latest report per source and whether any
+        source was dropped by this update.
         """
+        dropped = False
         for source in list(self._reports):
             if source in current:
                 continue
             self._missed[source] += 1
-            if (
-                self._missed[source] > self._max_missed
-                or now - self._last_seen[source] > self._max_age
-            ):
+            if self._missed[source] > self._max_missed:
                 del self._reports[source]
                 del self._missed[source]
-                del self._last_seen[source]
+                dropped = True
         for source, report in current.items():
             self._reports[source] = report
             self._missed[source] = 0
-            self._last_seen[source] = now
-        return list(self._reports.values())
+        return list(self._reports.values()), dropped
 
 
 def dm1_lamp_state(value: int) -> str:
@@ -348,12 +344,13 @@ class J1939Decoder:
     def _dm1_config_applies(self, port: str, source_address: int | None) -> bool:
         """Whether the profile's DM1 options apply to a port and source.
 
-        Empty ``ports`` means every port; ``source_addresses`` of None means
-        every source. An unknown source (None) is not filtered.
+        ``ports`` / ``source_addresses`` of None mean every port / source; a
+        tuple (possibly empty) means only those. An unknown source (None) is
+        not filtered.
         """
         if self._dm1_config is None:
             return False
-        if self._dm1_config.ports and port not in self._dm1_config.ports:
+        if self._dm1_config.ports is not None and port not in self._dm1_config.ports:
             return False
         sources = self._dm1_config.source_addresses
         if sources is not None and source_address is not None and source_address not in sources:

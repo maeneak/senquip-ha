@@ -143,6 +143,9 @@ class _EmptyProtocolStub:
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
         return {}, [], False
 
+    def reset_runtime_state(self, _decoder):
+        pass
+
     def resolve_signal_meta(self, _signal_key, _decoder):
         return SensorMeta(name="Engine Speed")
 
@@ -155,6 +158,9 @@ class _ToggleProtocolStub:
 
     def decode_runtime(self, _frames, _port_id, _selected_signals, _decoder):
         return dict(self.values), [], bool(self.values)
+
+    def reset_runtime_state(self, _decoder):
+        pass
 
     def resolve_signal_meta(self, _signal_key, _decoder):
         return SensorMeta(name="Engine Speed")

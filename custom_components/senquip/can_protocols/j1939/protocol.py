@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, SensorDeviceClass, SensorMeta, SensorStateClass
@@ -74,9 +73,22 @@ _MAX_STATE_LENGTH = 255
 
 
 def _combine_dm1_reports(port_id: str, reports: list[dict[str, Any]]) -> dict[str, Any]:
-    """Combine the latest DM1 report from each source into port-level values."""
+    """Combine the latest DM1 report from each source into port-level values.
+
+    With no reports (every source aged out while the port is still live) the
+    fault state is unknown: lamps and SPN/FMI are Unknown and the description
+    says so. Fault count and occurrence count are numeric and left unchanged.
+    """
     prefix = f"can.{port_id}.j1939.dm1."
     values: dict[str, Any] = {}
+
+    if not reports:
+        for field in _DM1_LAMP_FIELDS.values():
+            values[prefix + field] = "Unknown"
+        values[prefix + "active_fault"] = "No DM1 Received"
+        values[prefix + "active_spn"] = "Unknown"
+        values[prefix + "active_fmi"] = "Unknown"
+        return values
 
     for lamp, field in _DM1_LAMP_FIELDS.items():
         states = [
@@ -379,15 +391,20 @@ class J1939CANProtocol:
                     values[raw_key] = hex_data
             diagnostics.append(frame_diag)
 
-        # Age sources on every payload; publish only when this payload had DM1
-        reports = decoder.dm1_tracker.update(dm1_by_source, time.monotonic())
-        if dm1_by_source:
+        # Age sources on every payload; publish when this payload had DM1 or a
+        # source aged out (so the last source going silent is not frozen)
+        reports, dropped = decoder.dm1_tracker.update(dm1_by_source)
+        if dm1_by_source or dropped:
             combined = _combine_dm1_reports(port_id, reports)
             for key, value in combined.items():
                 if key in selected_signals:
                     values[key] = value
 
         return values, diagnostics, has_valid_data
+
+    def reset_runtime_state(self, decoder: J1939Decoder) -> None:
+        """Forget tracked DM1 sources (device offline / port unavailable)."""
+        decoder.dm1_tracker.reset()
 
     def resolve_signal_meta(self, signal_key: str, decoder: J1939Decoder) -> SensorMeta:
         if ".spn" in signal_key:

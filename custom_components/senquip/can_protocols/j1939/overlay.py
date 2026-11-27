@@ -17,8 +17,8 @@ class DM1Config:
     """Configuration for DM1 (Diagnostic Message 1) decoding."""
 
     spn_encoding: str = "little_endian"
-    ports: tuple[str, ...] = ()
-    # None = every source; a tuple (possibly empty) = only those sources
+    # None = every port / source; a tuple (possibly empty) = only those
+    ports: tuple[str, ...] | None = None
     source_addresses: tuple[int, ...] | None = None
     custom_fault_spns: dict[int, str] = field(default_factory=dict)
 
@@ -151,16 +151,30 @@ def _parse_dm1_config(dm1_data: Any, profile_name: str) -> DM1Config | None:
         _LOGGER.warning("Invalid dm1.spn_encoding in %s: %s", profile_name, spn_encoding)
         spn_encoding = "little_endian"
 
-    ports_raw = dm1_data.get("ports", [])
-    if not isinstance(ports_raw, list):
-        ports_raw = []
-    ports = tuple(str(item) for item in ports_raw)
+    # A filter that was given but is unusable matches nothing, so a typo can
+    # never widen the DM1 options to every port or every ECU on the bus.
+    # Omitted or null means "all".
+    ports: tuple[str, ...] | None = None
+    ports_raw = dm1_data.get("ports")
+    if ports_raw is not None:
+        valid_ports: list[str] = []
+        if isinstance(ports_raw, list):
+            for item in ports_raw:
+                if isinstance(item, str):
+                    valid_ports.append(item)
+                else:
+                    _LOGGER.warning("Invalid dm1.ports entry in %s: %s", profile_name, item)
+        else:
+            _LOGGER.warning("Invalid dm1.ports in %s: must be a list of strings", profile_name)
+        if not valid_ports:
+            _LOGGER.warning(
+                "No valid dm1.ports in %s; its DM1 options apply to no port", profile_name
+            )
+        ports = tuple(valid_ports)
 
-    # A filter that was given but is unusable matches no source, so a typo
-    # can never widen big-endian decoding to every ECU on the bus.
     source_addresses: tuple[int, ...] | None = None
-    if "source_addresses" in dm1_data:
-        sources_raw = dm1_data["source_addresses"]
+    sources_raw = dm1_data.get("source_addresses")
+    if sources_raw is not None:
         valid: list[int] = []
         if isinstance(sources_raw, list):
             for item in sources_raw:

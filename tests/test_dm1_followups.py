@@ -238,6 +238,27 @@ class TestPerSourceEncoding:
         assert dm1.source_addresses == (0, 39)
         assert dm1.spn_encoding == "big_endian"
 
+    def test_null_filters_mean_all(self):
+        _, _, dm1 = parse_j1939_profile(CANProfile(
+            filename="null.json", name="Null", base_protocol="j1939", description="",
+            protocol_data={"j1939": {"dm1": {
+                "spn_encoding": "big_endian", "ports": None, "source_addresses": None,
+            }}},
+        ))
+        assert dm1.ports is None and dm1.source_addresses is None
+        assert J1939Decoder(dm1_config=dm1).is_dm1_big_endian("can1", 7) is True
+
+    @pytest.mark.parametrize("ports", ["can2", [], [2]])
+    def test_unusable_ports_match_no_port(self, ports):
+        _, _, dm1 = parse_j1939_profile(CANProfile(
+            filename="p.json", name="P", base_protocol="j1939", description="",
+            protocol_data={"j1939": {"dm1": {"spn_encoding": "big_endian", "ports": ports}}},
+        ))
+        assert dm1.ports == ()
+        decoder = J1939Decoder(dm1_config=dm1)
+        assert decoder.is_dm1_big_endian("can1", 0) is False
+        assert decoder.is_dm1_big_endian("can2", 0) is False
+
     @pytest.mark.parametrize("sources", [["0x00"], 0, "0x27", []])
     def test_unusable_source_addresses_match_no_source(self, sources):
         """A given-but-unusable filter must never widen to every source."""
@@ -285,25 +306,70 @@ class TestPerSourceEncoding:
 
 class TestDM1SourceTracker:
     def test_drops_after_more_than_max_missed(self):
-        tracker = DM1SourceTracker(max_missed=2, max_age=1e9)
-        tracker.update({1: {"id": 1}}, 0.0)
-        assert len(tracker.update({}, 1.0)) == 1
-        assert len(tracker.update({}, 2.0)) == 1
-        assert tracker.update({}, 3.0) == []
+        tracker = DM1SourceTracker(max_missed=2)
+        tracker.update({1: {"id": 1}})
+        assert tracker.update({}) == ([{"id": 1}], False)
+        assert tracker.update({}) == ([{"id": 1}], False)
+        assert tracker.update({}) == ([], True)
 
-    def test_drops_after_max_age(self):
-        """An ECU switched off overnight must not reappear in the next payload."""
-        tracker = DM1SourceTracker(max_missed=100, max_age=300.0)
-        tracker.update({1: {"id": 1}, 2: {"id": 2}}, 0.0)
-        reports = tracker.update({2: {"id": 2, "new": True}}, 8 * 3600.0)
-        assert reports == [{"id": 2, "new": True}]
+    def test_refresh_resets_counter(self):
+        tracker = DM1SourceTracker(max_missed=1)
+        tracker.update({1: {"v": 1}})
+        tracker.update({})
+        tracker.update({1: {"v": 2}})
+        assert tracker.update({}) == ([{"v": 2}], False)
 
-    def test_refresh_resets_counters(self):
-        tracker = DM1SourceTracker(max_missed=1, max_age=10.0)
-        tracker.update({1: {"v": 1}}, 0.0)
-        tracker.update({}, 5.0)
-        tracker.update({1: {"v": 2}}, 9.0)
-        assert tracker.update({}, 15.0) == [{"v": 2}]
+    def test_reset_forgets_sources(self):
+        tracker = DM1SourceTracker()
+        tracker.update({1: {"v": 1}})
+        tracker.reset()
+        assert tracker.update({}) == ([], False)
+
+
+class TestDM1StateLifecycle:
+    def test_last_source_aging_out_is_published(self):
+        """The last silent source must not freeze its faults on the port."""
+        protocol, decoder = _man_runtime()
+        eec1_only = [{"id": 217056256, "data": "3FFFCD883927F4FF"}]
+        run = lambda frames: protocol.decode_runtime(frames, "can2", ALL_DM1, decoder)[0]
+        assert run([MAN_BAM_3_DTCS])[PREFIX + "active_fault_count"] == 3
+        for _ in range(5):
+            assert not any(k.startswith(PREFIX) for k in run(eec1_only))
+        values = run(eec1_only)
+        assert values[PREFIX + "active_fault"] == "No DM1 Received"
+        assert values[PREFIX + "red_stop"] == "Unknown"
+        assert values[PREFIX + "active_spn"] == "Unknown"
+        assert PREFIX + "active_fault_count" not in values  # numeric: left unchanged
+
+    def test_device_offline_resets_dm1_sources(self):
+        """An ECU switched off overnight must not reappear in the morning."""
+        from unittest.mock import MagicMock
+        from custom_components.senquip import SenquipDataCoordinator
+        from tests.ha_stubs import ConfigEntry
+
+        selected = sorted(ALL_DM1)
+        entry = ConfigEntry(data={
+            "device_id": "dev", "mqtt_topic": "t", "selected_signals": selected,
+            "port_configs": {"can2": {
+                "family": "can", "active": True, "protocol": "j1939",
+                "profiles": ["man_d2862.json"],
+            }},
+        })
+        profiles = discover_profiles(Path("custom_components/senquip/can_profiles"))
+        coord = SenquipDataCoordinator(MagicMock(), entry, profiles)
+        engine2_red_stop = {"id": 0x18FECA01, "data": "D1FFFE00C201FFFF"}
+        coord._parse_payload({"deviceid": "dev", "can2": [MAN_NO_FAULT, engine2_red_stop]})
+        coord._mark_device_offline()
+        values = coord._parse_payload({"deviceid": "dev", "can2": [MAN_NO_FAULT]})
+        assert values[PREFIX + "red_stop"] == "Off"
+        assert values[PREFIX + "active_fault"] == "No Active Fault"
+
+    def test_port_absent_resets_dm1_sources(self):
+        protocol, decoder = _man_runtime()
+        protocol.decode_runtime([MAN_ESTOP_BE, GEARBOX_COOLANT_LE], "can2", ALL_DM1, decoder)
+        protocol.reset_runtime_state(decoder)
+        values, _, _ = protocol.decode_runtime([GEARBOX_COOLANT_LE], "can2", ALL_DM1, decoder)
+        assert values[PREFIX + "active_fault_count"] == 1
 
 
 # ---------------------------------------------------------------------------
