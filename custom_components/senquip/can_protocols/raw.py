@@ -107,6 +107,9 @@ class RawCANProtocol:
 
         return values, diagnostics, has_valid_data
 
+    def reset_runtime_state(self, decoder: Any) -> None:
+        """Raw protocols keep no state between payloads."""
+
     def resolve_signal_meta(self, signal_key: str, decoder: Any) -> SensorMeta:
         """Resolve metadata for raw-only protocol signal keys."""
         del decoder

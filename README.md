@@ -19,8 +19,11 @@ The integration subscribes to MQTT telemetry, supports protocol-based CAN decodi
   - `can.<port>.<protocol>.raw.<pgn>`
   - `event.main.last`
 - J1939 DM1 fault reporting:
-  - Active fault, lamp status (Protect / Amber Warning / Red Stop / MIL) and SPN/FMI sensors
-  - `DM1 Fault History` sensor per J1939 port with DM1 signals selected: persistent log of past faults (SPN, FMI, description, lamps, first seen, last activated, cleared, activation count), restored across restarts. Keeps up to 25 entries: the least recently active cleared faults are dropped first and active faults are never dropped
+  - Active fault, active fault count, lamp status (Protect / Amber Warning / Red Stop / MIL) and SPN/FMI sensors
+  - DM1 from several ECUs on one port is combined: each lamp shows the most severe state (Active > Unknown > Off > Not Available) and the fault text lists every decoded fault
+  - Multi-packet DM1 (2+ faults, sent as a BAM transfer) is detected and reported as "N Active Faults (details not decoded)". A Senquip payload holds one frame per CAN ID, so the individual DTCs cannot be reassembled; that ECU's lamps show `Unknown`, Active SPN/FMI show `Unknown`, and Occurrence Count keeps its last value. In the fault history, that ECU's previously known faults stay active until it sends a single-frame DM1 again
+  - An ECU missing from a payload keeps its last DM1 state for up to 5 payloads, so the port values do not flicker when a frame is not captured. After that it is dropped; if no ECU is left the Active Fault shows `No DM1 Received` with lamps `Unknown`. This memory is cleared when the device goes offline or the port becomes unavailable
+  - `DM1 Fault History` sensor per J1939 port with DM1 signals selected: persistent log of past faults (SPN, FMI, description, lamps, first seen, last activated, cleared, activation count). Saved to `.storage` about a second after each change, so it survives restarts and power loss. Keeps up to 25 entries: the least recently active cleared faults are dropped first and active faults are never dropped
 - Profile overlays for CAN protocols via `custom_components/senquip/can_profiles/`
 - Options flow to rediscover and reconfigure protocols/signals without removing the integration
 - Diagnostics output includes `selected_signals`, `port_configs`, and protocol-specific CAN summaries
@@ -96,6 +99,24 @@ Each profile uses the generic schema:
   }
 }
 ```
+
+### DM1 options
+
+The optional `dm1` section configures manufacturer-specific DM1 decoding:
+
+```json
+"dm1": {
+  "spn_encoding": "big_endian",
+  "ports": ["can2"],
+  "source_addresses": [0, 39],
+  "custom_fault_spns": { "520198": "Emergency Stop" }
+}
+```
+
+- `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (MAN)
+- `ports`: limit the DM1 options to these ports. Leave it out (or `null`) for all ports using the profile
+- `source_addresses`: limit the DM1 options to DM1 from these J1939 source addresses, so other ECUs on the same bus keep standard decoding. Leave it out (or `null`) for all sources. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. An empty list, or a value that is not a list of valid entries (port names; integers 0-255), matches nothing rather than everything, so a typo cannot widen the options
+- `custom_fault_spns`: names for proprietary fault SPNs. Only applied to DM1 from the ports and sources above, since proprietary SPNs overlap between manufacturers
 
 ### Current bundled profile
 

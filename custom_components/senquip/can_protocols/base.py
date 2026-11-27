@@ -47,3 +47,6 @@ class CANProtocol(Protocol):
     def resolve_signal_meta(self, signal_key: str, decoder: Any) -> Any:
         """Resolve protocol-specific metadata for a signal key."""
 
+    def reset_runtime_state(self, decoder: Any) -> None:
+        """Forget state carried between payloads (device offline / port unavailable)."""
+

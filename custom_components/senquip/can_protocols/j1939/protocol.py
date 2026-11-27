@@ -8,7 +8,13 @@ from ...const import SPN_STATE_CLASS_OVERRIDES, SPN_UNIT_TO_HA, EntityCategory, 
 from ...can_profiles.loader import CANProfile
 from ..base import ProtocolDiscoveredSignal
 from .database import PGN_DATABASE, SPN_DATABASE
-from .decoder import DM1_PGN, J1939Decoder, dm1_lamp_state
+from .decoder import (
+    DM1_PGN,
+    TP_CM_PGN,
+    J1939Decoder,
+    dm1_fault_count_text,
+    dm1_lamp_state,
+)
 from .overlay import merge_j1939_databases
 
 
@@ -46,7 +52,85 @@ _DM1_META: dict[str, SensorMeta] = {
         icon="mdi:counter",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    "active_fault_count": SensorMeta(
+        name="DM1 Active Fault Count",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:alert-circle-check-outline",
+    ),
 }
+
+_DM1_LAMP_FIELDS: dict[str, str] = {
+    "protect": "protect_lamp",
+    "amber_warning": "amber_warning",
+    "red_stop": "red_stop",
+    "mil": "mil",
+}
+
+# When sources disagree, the port-level lamp shows the most severe state
+_LAMP_SEVERITY: dict[str, int] = {"Active": 3, "Unknown": 2, "Off": 1, "Not Available": 0}
+
+_MAX_STATE_LENGTH = 255
+
+
+def _combine_dm1_reports(port_id: str, reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine the latest DM1 report from each source into port-level values.
+
+    With no reports (every source aged out while the port is still live) the
+    fault state is unknown: lamps and SPN/FMI are Unknown and the description
+    says so. Fault count and occurrence count are numeric and left unchanged.
+    """
+    prefix = f"can.{port_id}.j1939.dm1."
+    values: dict[str, Any] = {}
+
+    if not reports:
+        for field in _DM1_LAMP_FIELDS.values():
+            values[prefix + field] = "Unknown"
+        values[prefix + "active_fault"] = "No DM1 Received"
+        values[prefix + "active_spn"] = "Unknown"
+        values[prefix + "active_fmi"] = "Unknown"
+        return values
+
+    for lamp, field in _DM1_LAMP_FIELDS.items():
+        states = [
+            report["lamps"].get(lamp, "Unknown") if report.get("lamps") else "Unknown"
+            for report in reports
+        ]
+        values[prefix + field] = max(states, key=lambda state: _LAMP_SEVERITY.get(state, 2))
+
+    total = sum(report["dtc_count"] for report in reports)
+    decoded = [r for r in reports if not r["multi_packet"] and r["dtc_count"] > 0]
+
+    if total == 0:
+        description = "No Active Fault"
+    elif total == 1 and decoded:
+        description = decoded[0]["active_fault"]
+    elif decoded:
+        description = dm1_fault_count_text(total, ": ") + "; ".join(
+            r["active_fault"] for r in decoded
+        )
+    else:
+        description = dm1_fault_count_text(total, " (details not decoded)")
+    if len(description) > _MAX_STATE_LENGTH:
+        description = description[: _MAX_STATE_LENGTH - 3] + "..."
+
+    values[prefix + "active_fault"] = description
+    values[prefix + "active_fault_count"] = total
+    if decoded:
+        first = decoded[0]
+        values[prefix + "active_spn"] = first["active_spn"]
+        values[prefix + "active_fmi"] = first["active_fmi"]
+        values[prefix + "occurrence_count"] = first["occurrence_count"]
+    elif total == 0:
+        values[prefix + "active_spn"] = 0
+        values[prefix + "active_fmi"] = 0
+        values[prefix + "occurrence_count"] = 0
+    else:
+        # Faults are active but none could be decoded (multi-packet only).
+        # 0 would mean "no fault", so report SPN/FMI as Unknown. Occurrence
+        # count is a measurement (numeric only) and is left unchanged.
+        values[prefix + "active_spn"] = "Unknown"
+        values[prefix + "active_fmi"] = "Unknown"
+    return values
 
 
 class J1939CANProtocol:
@@ -125,6 +209,13 @@ class J1939CANProtocol:
                     default_selected=True,
                 ),
                 ProtocolDiscoveredSignal(
+                    key=f"can.{port_id}.j1939.dm1.active_fault_count",
+                    name="DM1 Active Fault Count",
+                    sample_value=0,
+                    unit=None,
+                    default_selected=True,
+                ),
+                ProtocolDiscoveredSignal(
                     key=f"can.{port_id}.j1939.dm1.protect_lamp",
                     name="DM1 Protect Lamp",
                     sample_value="Off",
@@ -187,6 +278,8 @@ class J1939CANProtocol:
         values: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
         has_valid_data = False
+        # DM1 report per source address in this payload (multi-packet wins)
+        dm1_by_source: dict[int, dict[str, Any]] = {}
 
         for frame in frames:
             can_id = frame.get("id")
@@ -214,32 +307,20 @@ class J1939CANProtocol:
                     diagnostics.append(frame_diag)
                     continue
 
-                big_endian = decoder.is_dm1_big_endian(port_id)
+                big_endian = decoder.is_dm1_big_endian(port_id, source)
                 dm1 = decoder.decode_dm1(dm1_bytes, big_endian_spn=big_endian)
                 if dm1 is not None:
                     has_valid_data = True
-                    custom_faults = decoder.get_dm1_custom_fault_spns()
+                    custom_faults = decoder.get_dm1_custom_fault_spns(port_id, source)
                     fault_desc = decoder.get_fault_description(
                         dm1.active_spn,
                         dm1.active_fmi,
                         custom_faults,
                     )
-                    dm1_values = {
-                        f"can.{port_id}.j1939.dm1.protect_lamp": dm1_lamp_state(dm1.lamp_protect),
-                        f"can.{port_id}.j1939.dm1.amber_warning": dm1_lamp_state(dm1.lamp_amber),
-                        f"can.{port_id}.j1939.dm1.red_stop": dm1_lamp_state(dm1.lamp_red),
-                        f"can.{port_id}.j1939.dm1.mil": dm1_lamp_state(dm1.lamp_mil),
-                        f"can.{port_id}.j1939.dm1.active_spn": dm1.active_spn,
-                        f"can.{port_id}.j1939.dm1.active_fmi": dm1.active_fmi,
-                        f"can.{port_id}.j1939.dm1.active_fault": fault_desc,
-                        f"can.{port_id}.j1939.dm1.occurrence_count": dm1.occurrence_count,
-                    }
-                    for key, value in dm1_values.items():
-                        if key in selected_signals:
-                            values[key] = value
-                    frame_diag["pgn_name"] = "DM1 - Active DTCs"
-                    frame_diag["pgn_acronym"] = "DM1"
-                    frame_diag["dm1"] = {
+                    has_fault = not (dm1.active_spn == 0 and dm1.active_fmi == 0)
+                    report = {
+                        "multi_packet": False,
+                        "dtc_count": 1 if has_fault else 0,
                         "active_spn": dm1.active_spn,
                         "active_fmi": dm1.active_fmi,
                         "active_fault": fault_desc,
@@ -252,8 +333,37 @@ class J1939CANProtocol:
                             "mil": dm1_lamp_state(dm1.lamp_mil),
                         },
                     }
+                    frame_diag["pgn_name"] = "DM1 - Active DTCs"
+                    frame_diag["pgn_acronym"] = "DM1"
+                    frame_diag["dm1"] = report
+                    # Payload order is CAN-ID slot order, not time order. If a
+                    # source sent both a single frame and a BAM this interval,
+                    # its state changed mid-interval; report the multi-packet
+                    # one (more faults) and let the next payload settle it.
+                    previous = dm1_by_source.get(source)
+                    if previous is None or not previous["multi_packet"]:
+                        dm1_by_source[source] = report
                 diagnostics.append(frame_diag)
                 continue
+
+            if pgn == TP_CM_PGN:
+                try:
+                    dtc_count = decoder.decode_dm1_bam(bytes.fromhex(hex_data))
+                except ValueError:
+                    dtc_count = None
+                if dtc_count is not None:
+                    has_valid_data = True
+                    report = {
+                        "multi_packet": True,
+                        "dtc_count": dtc_count,
+                        "active_spn": None,
+                        "active_fmi": None,
+                        "active_fault": dm1_fault_count_text(dtc_count, " (details not decoded)"),
+                        "occurrence_count": None,
+                        "lamps": None,
+                    }
+                    frame_diag["dm1"] = report
+                    dm1_by_source[source] = report
 
             decoded = decoder.decode_frame(can_id, hex_data)
             if pgn_def is not None:
@@ -281,7 +391,20 @@ class J1939CANProtocol:
                     values[raw_key] = hex_data
             diagnostics.append(frame_diag)
 
+        # Age sources on every payload; publish when this payload had DM1 or a
+        # source aged out (so the last source going silent is not frozen)
+        reports, dropped = decoder.dm1_tracker.update(dm1_by_source)
+        if dm1_by_source or dropped:
+            combined = _combine_dm1_reports(port_id, reports)
+            for key, value in combined.items():
+                if key in selected_signals:
+                    values[key] = value
+
         return values, diagnostics, has_valid_data
+
+    def reset_runtime_state(self, decoder: J1939Decoder) -> None:
+        """Forget tracked DM1 sources (device offline / port unavailable)."""
+        decoder.dm1_tracker.reset()
 
     def resolve_signal_meta(self, signal_key: str, decoder: J1939Decoder) -> SensorMeta:
         if ".spn" in signal_key:

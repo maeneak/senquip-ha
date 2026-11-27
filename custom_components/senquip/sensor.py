@@ -15,7 +15,8 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -29,7 +30,12 @@ from .const import (
     PORT_DISPLAY_NAMES,
     SensorMeta,
 )
-from .fault_history import DM1FaultLog
+from .fault_history import (
+    FAULT_HISTORY_SAVE_DELAY,
+    FAULT_HISTORY_STORE_VERSION,
+    DM1FaultLog,
+    fault_history_store_key,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -203,28 +209,20 @@ class SenquipSensorEntity(CoordinatorEntity, SensorEntity):
 
 
 
-class _FaultLogStoredData(ExtraStoredData):
-    """Restore-state payload holding a serialized DM1 fault log."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
-
-    def as_dict(self) -> dict[str, Any]:
-        return self._data
-
-
 class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     """Persistent log of DM1 faults seen on a J1939 CAN port.
 
     State is the number of logged faults; the log itself is exposed in the
-    ``faults`` attribute and restored across Home Assistant restarts.
+    ``faults`` attribute. The log is saved to its own .storage file shortly
+    after every change so it survives restarts and power loss.
+    ``RestoreEntity`` is kept only to migrate logs saved by 0.6.0.
     """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_icon = "mdi:clipboard-text-clock"
-    # The full log is persisted via restore data; recording it on every change
-    # would bloat the database. Count, active_faults and last_fault are recorded.
+    # The full log is persisted in .storage; recording it on every change would
+    # bloat the database. Count, active_faults and last_fault are recorded.
     _unrecorded_attributes = frozenset({"faults"})
 
     def __init__(
@@ -241,15 +239,44 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         self._attr_name = "DM1 Fault History"
         self._attr_device_info = _build_device_info(signal_key, device_id, device_name)
         self._log = DM1FaultLog()
+        self._store: Store = Store(
+            coordinator.hass,
+            FAULT_HISTORY_STORE_VERSION,
+            fault_history_store_key(device_id, port_id),
+            atomic_writes=True,
+        )
 
     async def async_added_to_hass(self) -> None:
-        """Restore the fault log saved before the last shutdown."""
+        """Load the persisted fault log, then start listening for updates.
+
+        Loading first means no coordinator update can land on the empty
+        placeholder log while the file is being read.
+        """
+        stored = await self._store.async_load()
+        if stored is not None:
+            self._log = DM1FaultLog.from_dict(stored)
+        else:
+            # Migrate a log that 0.6.0 kept in restore-state data
+            last_extra = await self.async_get_last_extra_data()
+            if last_extra is not None:
+                self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+                self._schedule_save()
         await super().async_added_to_hass()
-        last_extra = await self.async_get_last_extra_data()
-        if last_extra is not None:
-            self._log = DM1FaultLog.from_dict(last_extra.as_dict())
         # Catch a payload that arrived before this entity was listening
-        self._observe_latest()
+        if self._observe_latest():
+            self._schedule_save()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Flush any pending save so it cannot land after the file is deleted."""
+        await super().async_will_remove_from_hass()
+        await self._store.async_save(self._log.as_dict())
+
+    def _schedule_save(self) -> None:
+        """Write the log to .storage after a short delay.
+
+        The data is read when the write happens, so it is always the current log.
+        """
+        self._store.async_delay_save(lambda: self._log.as_dict(), FAULT_HISTORY_SAVE_DELAY)
 
     def _observe_latest(self) -> bool:
         """Feed the latest payload's DM1 frames into the log."""
@@ -257,11 +284,6 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
             self.coordinator.get_dm1_reports(self._port_id),
             datetime.now(timezone.utc),
         )
-
-    @property
-    def extra_restore_state_data(self) -> ExtraStoredData:
-        """Return the fault log for restore storage."""
-        return _FaultLogStoredData(self._log.as_dict())
 
     @property
     def available(self) -> bool:
@@ -272,6 +294,7 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
     def _handle_coordinator_update(self) -> None:
         """Update the log; write state only when it changed."""
         if self._observe_latest():
+            self._schedule_save()
             self.async_write_ha_state()
 
     @property

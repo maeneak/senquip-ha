@@ -180,12 +180,53 @@ class ExtraStoredData:
         raise NotImplementedError
 
 
+# ---------------------------------------------------------------------------
+# homeassistant.helpers.storage
+# ---------------------------------------------------------------------------
+
+class Store:
+    """In-memory stand-in for HA's Store. ``Store.saved`` is shared across instances."""
+
+    saved: dict[str, Any] = {}
+
+    def __init__(self, hass, version, key, **kwargs):
+        self.key = key
+        self.version = version
+        self.kwargs = kwargs
+        self.save_calls = 0
+        self._pending = None
+
+    async def async_load(self):
+        return Store.saved.get(self.key)
+
+    def async_delay_save(self, data_func, delay=0):
+        """Like HA, ``data_func`` is only called when the write happens (``flush``)."""
+        self.save_calls += 1
+        self._pending = data_func
+
+    def flush(self):
+        """Run a pending delayed save, as HA's timer would."""
+        if self._pending is not None:
+            Store.saved[self.key] = self._pending()
+            self._pending = None
+
+    async def async_save(self, data):
+        self._pending = None
+        Store.saved[self.key] = data
+
+    async def async_remove(self):
+        Store.saved.pop(self.key, None)
+
+
 class RestoreEntity:
     """Stub — set ``_stub_last_extra_data`` on an instance to simulate a restore."""
 
     _stub_last_extra_data = None
 
     async def async_added_to_hass(self):
+        pass
+
+    async def async_will_remove_from_hass(self):
         pass
 
     async def async_get_last_extra_data(self):

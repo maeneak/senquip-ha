@@ -12,6 +12,7 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .can_profiles.loader import CANProfile, discover_profiles
@@ -31,6 +32,7 @@ from .const import (
     SensorStateClass,
     deserialize_port_configs,
 )
+from .fault_history import FAULT_HISTORY_STORE_VERSION, fault_history_store_key
 from .signal_keys import LEGACY_SELECTED_SENSORS_KEY, normalize_selected_signals
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,6 +145,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._offline_timer = None
         for port_id in self._can_port_available:
             self._can_port_available[port_id] = False
+        for protocol, decoder in self._can_runtime.values():
+            protocol.reset_runtime_state(decoder)
         # Push an update so binary sensors refresh
         if self.data is not None:
             self.async_set_updated_data(self.data)
@@ -310,6 +314,8 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 data.update(port_values)
                 self._can_port_available[key] = port_has_valid_data
+                if not port_has_valid_data:
+                    protocol.reset_runtime_state(decoder)
                 if port_diag:
                     diag[key] = {
                         "protocol": protocol.protocol_id,
@@ -339,9 +345,10 @@ class SenquipDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     data[signal_key] = value
 
         # Mark configured CAN ports as unavailable when absent from payload
-        for port_id in self._can_runtime:
+        for port_id, (protocol, decoder) in self._can_runtime.items():
             if port_id not in payload:
                 self._can_port_available[port_id] = False
+                protocol.reset_runtime_state(decoder)
 
         self.diagnostics = diag
         self._dm1_reports = dm1_reports
@@ -381,3 +388,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     return unload_ok
 
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete persisted DM1 fault logs when the config entry is removed."""
+    device_id = entry.data.get(CONF_DEVICE_ID)
+    if not device_id:
+        return
+    for port_id in CAN_PORTS:
+        store = Store(
+            hass,
+            FAULT_HISTORY_STORE_VERSION,
+            fault_history_store_key(device_id, port_id),
+            atomic_writes=True,
+        )
+        await store.async_remove()
