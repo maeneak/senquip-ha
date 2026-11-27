@@ -19,9 +19,13 @@ the fault history sensor fires as a Home Assistant event.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 MAX_FAULT_LOG_ENTRIES = 25
+
+# Saved log format. 1 (0.6.0-0.7.0): SPNs from the MAN profile's sources were
+# decoded big-endian. 2 (0.8.0): every SPN is decoded little-endian.
+FAULT_LOG_FORMAT = 2
 
 # Home Assistant Store (.storage) settings for the persisted log
 FAULT_HISTORY_STORE_VERSION = 1
@@ -31,6 +35,18 @@ FAULT_HISTORY_SAVE_DELAY = 1  # seconds; batches bursts of changes into one writ
 def fault_history_store_key(device_id: str, port_id: str) -> str:
     """Return the .storage key holding one port's fault log."""
     return f"senquip.dm1_fault_history.{device_id}.{port_id}"
+
+
+def big_endian_spn_to_little_endian(spn: int) -> int:
+    """Re-read an SPN decoded big-endian as the standard little-endian value.
+
+    Big-endian read DTC bytes 3-5 as ``(b3 << 11) | (b4 << 3) | (b5 >> 5)``;
+    the standard layout is ``b3 | (b4 << 8) | ((b5 >> 5) << 16)``.
+    """
+    byte3 = (spn >> 11) & 0xFF
+    byte4 = (spn >> 3) & 0xFF
+    return byte3 | (byte4 << 8) | ((spn & 0x07) << 16)
+
 
 _LAMP_NAMES: dict[str, str] = {
     "protect": "Protect",
@@ -198,6 +214,35 @@ class DM1FaultLog:
             self._trim()
         return changed
 
+    def convert_big_endian_spns(
+        self,
+        was_big_endian: Callable[[int], bool],
+        describe: Callable[[int, int, int], str],
+    ) -> bool:
+        """Re-key entries logged with big-endian SPN decoding (format 1 logs).
+
+        ``was_big_endian(source)`` says whether a source's DM1 was decoded
+        big-endian; ``describe(source, spn, fmi)`` gives the new description.
+        No transitions are recorded. Returns True if any entry changed.
+
+        Every entry is re-keyed in one pass: the conversion is one-to-one, so
+        keys stay unique, but a corrected SPN can equal another entry's old one.
+        """
+        changed = False
+        converted: dict[_FaultKey, dict[str, Any]] = {}
+        for key, entry in self._entries.items():
+            source, spn, fmi = key
+            if spn != _MULTI_PACKET and was_big_endian(source):
+                new_spn = big_endian_spn_to_little_endian(spn)
+                if new_spn != spn:
+                    entry["spn"] = new_spn
+                    entry["description"] = describe(source, new_spn, fmi)
+                    key = (source, new_spn, fmi)
+                    changed = True
+            converted[key] = entry
+        self._entries = converted
+        return changed
+
     def _trim(self) -> None:
         """Drop the least recently active cleared entries beyond the size limit.
 
@@ -216,8 +261,8 @@ class DM1FaultLog:
             del self._entries[key]
 
     def as_dict(self) -> dict[str, Any]:
-        """Serialize the log for Home Assistant restore storage."""
-        return {"entries": self.entries}
+        """Serialize the log for Home Assistant storage."""
+        return {"format": FAULT_LOG_FORMAT, "entries": self.entries}
 
     @classmethod
     def from_dict(

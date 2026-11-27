@@ -202,7 +202,7 @@ This is a **MAN-proprietary PGN** not in the J1939 standard. All SPNs are MAN-sp
 | 5–6 | Gearbox Reverse Position | 00=not reverse, 01=reverse, 1x=invalid |
 | 7–8 | — | Default `11` (not used) |
 
-Observed in service (2026-11-27): starboard `C1` (neutral) and `C4` (forward); after an ECU power cycle starboard reported `C0` (no flag set) at idle until the first shift. The port engine reports `C0` at all times, including in gear. The profile decodes `C0` as `No Position`.
+Observed in service (2026-11-27): starboard `C1` (neutral) and `C4` (forward); after an ECU power cycle starboard reported `C0` (no flag set) at idle until the first shift. The port engine reports `C0` at all times, including in gear. The profile decodes `C0` as `Not Reported`.
 
 #### Byte 2 — Engine Start/Stop (bit-level)
 

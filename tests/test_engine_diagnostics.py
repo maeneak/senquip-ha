@@ -3,8 +3,10 @@
 Frames are taken from a capture of the MAN D2862 engines on 2026-11-27.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,9 +16,20 @@ from custom_components.senquip.can_profiles.loader import discover_profiles
 from custom_components.senquip.can_protocols.j1939.protocol import J1939CANProtocol
 from custom_components.senquip.const import EVENT_DM1_FAULT, SensorDeviceClass
 from custom_components.senquip.fault_history import DM1FaultLog
-from custom_components.senquip import sensor as sensor_module
+from custom_components.senquip.fault_history import (
+    FAULT_LOG_FORMAT,
+    big_endian_spn_to_little_endian,
+    fault_history_store_key,
+)
 from custom_components.senquip.sensor import SenquipDM1FaultHistorySensor, _resolve_sensor_meta
-from tests.ha_stubs import ConfigEntry
+from tests.ha_stubs import DEVICE_REGISTRY, ConfigEntry, Store
+
+@pytest.fixture(autouse=True)
+def _clean_store():
+    Store.saved.clear()
+    yield
+    Store.saved.clear()
+
 
 EEC1_ID = 0x0CF00400
 GEARBOX_ID = 0x18FF1C00
@@ -100,7 +113,7 @@ class TestGearboxStatus:
     @pytest.mark.parametrize(
         "byte1, expected",
         [
-            ("C0", "No Position"),  # port engine in gear; starboard after power-up
+            ("C0", "Not Reported"),  # port engine in gear; starboard after power-up
             ("C1", "Neutral"),
             ("C4", "Forward"),
             ("D0", "Reverse"),
@@ -112,9 +125,9 @@ class TestGearboxStatus:
         _, decoder = _man_decoder()
         assert decoder.decode_frame(GEARBOX_ID, byte1 + "F0FFFF00FF00FF")[800005] == expected
 
-    def test_no_position_is_an_option(self):
+    def test_not_reported_is_an_option(self):
         meta = _resolve_sensor_meta("can.can2.j1939.spn800005", _CoordinatorStub())
-        assert meta.options == ["No Position", "Neutral", "Forward", "Reverse"]
+        assert meta.options == ["Not Reported", "Neutral", "Forward", "Reverse"]
 
 
 # ---------------------------------------------------------------------------
@@ -234,22 +247,141 @@ class TestFaultEvents:
         coord = _coordinator()
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
         sensor.registry_entry = MagicMock(device_id="abc123")
-        device = MagicMock(name_by_user="D2862 LE466 (Starboard)")
-        registry = MagicMock()
-        registry.async_get.return_value = device
-        monkeypatch.setattr(sensor_module.dr, "async_get", MagicMock(return_value=registry), raising=False)
-
+        monkeypatch.setitem(
+            DEVICE_REGISTRY.devices, "abc123",
+            SimpleNamespace(name_by_user="D2862 LE466 (Starboard)", name="Senquip CAN 2"),
+        )
         coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
         sensor._handle_coordinator_update()
         [raised] = _fired(coord)
         assert raised["device_id"] == "abc123"
         assert raised["device_name"] == "D2862 LE466 (Starboard)"
-        registry.async_get.assert_called_once_with("abc123")
+
+    def test_event_falls_back_to_registry_name(self, monkeypatch):
+        coord = _coordinator()
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+        sensor.registry_entry = MagicMock(device_id="abc123")
+        monkeypatch.setitem(
+            DEVICE_REGISTRY.devices, "abc123", SimpleNamespace(name_by_user=None, name="Senquip CAN 2"),
+        )
+        coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
+        sensor._handle_coordinator_update()
+        assert _fired(coord)[0]["device_name"] == "Senquip CAN 2"
+
+    def test_no_event_without_registry_entry_lookup(self):
+        """Without a registry entry the config entry's device name is used."""
+        coord = _coordinator()
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+        coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
+        sensor._handle_coordinator_update()
+        assert _fired(coord)[0]["device_id"] is None
 
     def test_pending_payload_at_startup_fires_event(self):
         coord = _coordinator()
         coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
-        import asyncio
         asyncio.run(sensor.async_added_to_hass())
         assert [e["status"] for e in _fired(coord)] == ["active"]
+
+
+# ---------------------------------------------------------------------------
+# Correcting fault logs saved with big-endian SPNs (0.6.0-0.7.0)
+# ---------------------------------------------------------------------------
+
+def _entry(source, spn, fmi, description, active=False):
+    return {
+        "source_address": source,
+        "spn": spn,
+        "fmi": fmi,
+        "description": description,
+        "lamps": ["Red Stop"] if spn else [],
+        "occurrence_count": 1 if spn else None,
+        "count": 2,
+        "active": active,
+        "first_seen": "2026-11-27T02:40:31.246622+00:00",
+        "last_activated": "2026-11-27T03:04:56.228856+00:00",
+        "cleared": None if active else "2026-11-27T03:05:06.191136+00:00",
+    }
+
+
+# The starboard log as saved by 0.7.0
+LOG_V070 = {"entries": [
+    _entry(0, 22407, 14, "SPN 22407: Unknown SPN 22407 (FMI 14: Special Instructions)"),
+    _entry(0, None, None, "3 Active Faults (details not decoded)"),
+    _entry(3, 110, 0, "SPN 110: Engine Coolant Temperature (FMI 0: Data Valid - Above Normal Range)"),
+]}
+STORE_KEY = fault_history_store_key("HE8EV12LF", "can2")
+
+
+def _load_sensor(coord):
+    sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+    asyncio.run(sensor.async_added_to_hass())
+    return sensor
+
+
+class TestBigEndianLogCorrection:
+    @pytest.mark.parametrize(
+        "big_endian, little_endian",
+        # Pairs from the live capture and the MAN PDF table (bytes FE 00 C2, 00 0C 81)
+        [(22407, 520202), (520198, 393470), (100, 265216), (0, 0)],
+    )
+    def test_spn_conversion(self, big_endian, little_endian):
+        assert big_endian_spn_to_little_endian(big_endian) == little_endian
+
+    def test_v070_log_corrected_on_load(self):
+        Store.saved[STORE_KEY] = LOG_V070
+        coord = _coordinator()
+        sensor = _load_sensor(coord)
+        by_source = {}
+        for entry in sensor.extra_state_attributes["faults"]:
+            by_source.setdefault(entry["source_address"], []).append(entry)
+        man = {e["spn"]: e for e in by_source[0]}
+        assert set(man) == {520202, None}
+        assert man[520202]["description"] == (
+            "SPN 520202: Engine Start Prevented (FMI 14: Special Instructions)"
+        )
+        assert man[520202]["count"] == 2  # history kept
+        # Not a MAN source: never decoded big-endian, left alone
+        assert [e["spn"] for e in by_source[3]] == [110]
+        assert _fired(coord) == []  # a correction is not a fault transition
+        sensor._store.flush()
+        assert Store.saved[STORE_KEY]["format"] == FAULT_LOG_FORMAT
+
+    def test_corrected_active_fault_continues_without_events(self):
+        """A fault active across the upgrade must not fire a false clear/raise."""
+        Store.saved[STORE_KEY] = {"entries": [
+            _entry(0, 22407, 14, "SPN 22407: Unknown SPN 22407", active=True),
+        ]}
+        coord = _coordinator()
+        sensor = _load_sensor(coord)
+        coord._parse_payload(_dm1_payload("D0FF0AF0EE01FFFF"))
+        sensor._handle_coordinator_update()
+        assert _fired(coord) == []
+        [entry] = sensor.extra_state_attributes["faults"]
+        assert entry["spn"] == 520202 and entry["active"] is True
+
+    def test_current_format_not_converted(self):
+        Store.saved[STORE_KEY] = {"format": FAULT_LOG_FORMAT, "entries": LOG_V070["entries"]}
+        sensor = _load_sensor(_coordinator())
+        assert 22407 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
+        assert sensor._store.save_calls == 0
+
+    def test_restore_state_log_converted(self):
+        """A 0.6.0 log migrated from restore-state data is corrected too."""
+        coord = _coordinator()
+        sensor = SenquipDM1FaultHistorySensor(coord, "can2", "HE8EV12LF", "Starboard Senquip Quad")
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=LOG_V070))
+        asyncio.run(sensor.async_added_to_hass())
+        assert 520202 in [e["spn"] for e in sensor.extra_state_attributes["faults"]]
+
+    def test_corrected_spn_equal_to_another_old_spn(self):
+        """22407 becomes 520202 while the old 520202 becomes 131582: keep both."""
+        log = DM1FaultLog.from_dict({"entries": [
+            _entry(0, 22407, 14, "a"),
+            _entry(0, 520202, 14, "b", active=True),
+        ]})
+        assert log.convert_big_endian_spns(lambda s: True, lambda src, spn, fmi: f"SPN {spn}") is True
+        by_spn = {e["spn"]: e for e in log.entries}
+        assert set(by_spn) == {520202, 131582}
+        assert by_spn[131582]["active"] is True
+        assert by_spn[520202]["description"] == "SPN 520202"

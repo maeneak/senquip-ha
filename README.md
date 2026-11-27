@@ -29,6 +29,8 @@ The integration subscribes to MQTT telemetry, supports protocol-based CAN decodi
   - `Engine Starter Mode` (SPN 1675): start not requested, starter active, start finished, or why a start is inhibited (engine running, not ready, driveline engaged, immobilizer, starter over-temperature, unknown)
   - `Source Address of Controlling Device` (SPN 1483): which controller is commanding the engine (e.g. `39` = 0x27, the MAN control system)
   - Existing entries pick these up via the options flow (`Configure` -> rediscover -> select the new signals)
+  - SPN 1483 was previously named `Source Address of Engine Controller` and recorded as a measurement. If you had it selected, Home Assistant reports that its state class was removed: fix it once from the repair prompt or `Developer Tools -> Statistics`
+- MAN D2862 gearbox status (PGN 65308) shows `Not Reported` when the engine sets none of the neutral / forward / reverse flags
 - Profile overlays for CAN protocols via `custom_components/senquip/can_profiles/`
 - Options flow to rediscover and reconfigure protocols/signals without removing the integration
 - Diagnostics output includes `selected_signals`, `port_configs`, and protocol-specific CAN summaries
@@ -149,7 +151,7 @@ The optional `dm1` section configures manufacturer-specific DM1 decoding:
 }
 ```
 
-- `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (SPN packed most significant byte first). The MAN D2862 PDF's worked example implies `big_endian`, but the engines in service send the standard layout, so the bundled MAN profile uses `little_endian`. Fault history entries logged before 0.8.0 keep the SPN numbers they were decoded with
+- `spn_encoding`: `little_endian` (J1939-73 standard, default) or `big_endian` (SPN packed most significant byte first). The MAN D2862 PDF's worked example implies `big_endian`, but the engines in service send the standard layout, so the bundled MAN profile uses `little_endian`. Fault history entries logged before 0.8.0 from the MAN profile's sources are corrected to the little-endian SPN (and description) once, when the history is loaded after upgrading
 - `ports`: limit the DM1 options to these ports. Leave it out (or `null`) for all ports using the profile
 - `source_addresses`: limit the DM1 options to DM1 from these J1939 source addresses, so other ECUs on the same bus keep standard decoding. Leave it out (or `null`) for all sources. The bundled MAN profile uses `[0, 1, 39]` (engine #1, engine #2, MAN MCS); add any other MAN ECU address on a shared bus. An empty list, or a value that is not a list of valid entries (port names; integers 0-255), matches nothing rather than everything, so a typo cannot widen the options
 - `custom_fault_spns`: names for proprietary fault SPNs. Only applied to DM1 from the ports and sources above, since proprietary SPNs overlap between manufacturers

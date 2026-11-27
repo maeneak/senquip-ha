@@ -370,7 +370,7 @@ class TestDM1StateLifecycle:
         })
         profiles = discover_profiles(Path("custom_components/senquip/can_profiles"))
         coord = SenquipDataCoordinator(MagicMock(), entry, profiles)
-        engine2_red_stop = {"id": 0x18FECA01, "data": "D1FFFE00C201FFFF"}
+        engine2_red_stop = {"id": 0x18FECA01, "data": "D1FF06F0E201FFFF"}
         coord._parse_payload({"deviceid": "dev", "can2": [MAN_NO_FAULT, engine2_red_stop]})
         coord._mark_device_offline()
         values = coord._parse_payload({"deviceid": "dev", "can2": [MAN_NO_FAULT]})

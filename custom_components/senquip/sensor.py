@@ -35,6 +35,7 @@ from .const import (
 from .fault_history import (
     FAULT_HISTORY_SAVE_DELAY,
     FAULT_HISTORY_STORE_VERSION,
+    FAULT_LOG_FORMAT,
     DM1FaultLog,
     fault_history_store_key,
 )
@@ -261,11 +262,14 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         stored = await self._store.async_load()
         if stored is not None:
             self._log = DM1FaultLog.from_dict(stored)
+            if stored.get("format", 1) < FAULT_LOG_FORMAT and self._convert_big_endian_spns():
+                self._schedule_save()
         else:
             # Migrate a log that 0.6.0 kept in restore-state data
             last_extra = await self.async_get_last_extra_data()
             if last_extra is not None:
                 self._log = DM1FaultLog.from_dict(last_extra.as_dict())
+                self._convert_big_endian_spns()
                 self._schedule_save()
         await super().async_added_to_hass()
         # Catch a payload that arrived before this entity was listening
@@ -277,6 +281,25 @@ class SenquipDM1FaultHistorySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         """Flush any pending save so it cannot land after the file is deleted."""
         await super().async_will_remove_from_hass()
         await self._store.async_save(self._log.as_dict())
+
+    def _convert_big_endian_spns(self) -> bool:
+        """Correct SPNs that 0.6.0-0.7.0 decoded big-endian.
+
+        Those versions decoded DM1 big-endian wherever the MAN profile's DM1
+        options applied; the engines send the standard layout, so the logged
+        SPNs (and descriptions) were wrong.
+        """
+        runtime = self.coordinator.get_can_runtime(self._port_id)
+        if runtime is None:
+            return False
+        decoder = runtime[1]
+        port = self._port_id
+        return self._log.convert_big_endian_spns(
+            lambda source: decoder.dm1_options_apply(port, source),
+            lambda source, spn, fmi: decoder.get_fault_description(
+                spn, fmi, decoder.get_dm1_custom_fault_spns(port, source)
+            ),
+        )
 
     def _schedule_save(self) -> None:
         """Write the log to .storage after a short delay.

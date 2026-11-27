@@ -180,7 +180,7 @@
           "offset": 0,
           "unit": "",
           "states": {
-            "0": "No Position",
+            "0": "Not Reported",
             "1": "Neutral",
             "4": "Forward",
             "16": "Reverse"

@@ -324,16 +324,25 @@ class TestFaultHistorySensor:
         assert restored.extra_state_attributes["faults"] == original.extra_state_attributes["faults"]
 
     def test_migrates_log_from_restore_state(self):
-        """A log kept in restore-state data by 0.6.0 is moved into .storage."""
+        """A log kept in restore-state data by 0.6.0 is moved into .storage.
+
+        0.6.0 decoded the MAN engine big-endian, so the E-stop (bytes 06 F0 E2)
+        was logged as SPN 14215; the migration also corrects it.
+        """
         legacy = DM1FaultLog()
-        legacy.observe([EMERGENCY_STOP], T0)
+        legacy.observe([_report(spn=14215, fmi=2, oc=1, desc="SPN 14215: Unknown SPN 14215")], T0)
+        legacy_data = legacy.as_dict()
+        legacy_data.pop("format")  # 0.6.0 saved no format marker
         _, coord = _coordinator(["can.can2.j1939.dm1.active_fault"])
         sensor = SenquipDM1FaultHistorySensor(coord, "can2", "test_dev", "Test")
-        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy.as_dict()))
+        sensor._stub_last_extra_data = MagicMock(as_dict=MagicMock(return_value=legacy_data))
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.native_value == 1
         sensor._store.flush()
-        assert Store.saved[fault_history_store_key("test_dev", "can2")] == legacy.as_dict()
+        [entry] = Store.saved[fault_history_store_key("test_dev", "can2")]["entries"]
+        assert entry["spn"] == 520198
+        assert entry["description"].startswith("SPN 520198: Emergency Stop")
+        assert entry["first_seen"] == legacy.entries[0]["first_seen"]
 
     def test_update_during_load_does_not_overwrite_history(self):
         """A payload landing while .storage is read must not save the empty log."""

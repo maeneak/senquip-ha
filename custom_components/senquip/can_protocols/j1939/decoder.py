@@ -357,6 +357,10 @@ class J1939Decoder:
             return False
         return True
 
+    def dm1_options_apply(self, port: str, source_address: int | None) -> bool:
+        """Whether a profile's DM1 options apply to a port and source."""
+        return self._dm1_config_applies(port, source_address)
+
     def is_dm1_big_endian(self, port: str, source_address: int | None = None) -> bool:
         """Check if DM1 SPN encoding should be big-endian for a port and source."""
         if self._dm1_config is None or self._dm1_config.spn_encoding != "big_endian":
